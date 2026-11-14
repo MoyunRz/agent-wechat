@@ -736,6 +736,9 @@ impl CdnClient {
         let mut server_md5 = None;
         let observe_video = descriptor.quality == MediaQuality::Video && !strict_transfer;
         let mut video_reply = VideoReplyMetadata::default();
+        let mut video_selected_response: Option<bool> = None;
+        let mut video_response_md5: Option<String> = None;
+        let mut video_response_bytes: Option<u64> = None;
         for sequence in 1..=u32::try_from(ciphertext_limit.div_ceil(chunk_bytes))? {
             progress(
                 position as u64,
@@ -1154,6 +1157,35 @@ impl VideoReplyMetadata {
 
 // Type 4 retains the normal download endpoint. Unlike file7, representation
 // and routing metadata cannot be ignored for a byte-exact original video.
+fn validate_large_video_reply_fields(reply: &CdnFields) -> Result<()> {
+    const FIELDS: &[&str] = &[
+        "ver",
+        "seq",
+        "retcode",
+        "filedata",
+        "rangestart",
+        "rangeend",
+        "totalsize",
+        "retrysec",
+        "isretry",
+        "isoverload",
+        "isgetcdn",
+        "istrans",
+        "backsrcnum",
+        "rawfilesize",
+        "rawfilemd5",
+        "substituteftype",
+        "rsppicformat",
+        "videoformat",
+        "x-ClientIp",
+    ];
+    ensure!(
+        reply.keys().all(|key| FIELDS.contains(&key.as_str())),
+        "Unsupported large-video download response field"
+    );
+    Ok(())
+}
+
 fn validate_large_video_download_reply(
     reply: &CdnFields,
     descriptor: &MediaDescriptor,
