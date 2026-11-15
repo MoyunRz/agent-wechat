@@ -16,9 +16,9 @@ pub struct Vault {
     key: Zeroizing<Vec<u8>>,
 }
 const MAX_CONTROL_RECORD_BYTES: usize = 32 * 1024 * 1024;
-const RECORD_OVERHEAD: usize = 29;
 /// Plaintext read or written per step when a media record is streamed.
 const STREAM_CHUNK: usize = 1024 * 1024;
+const RECORD_OVERHEAD: usize = 29;
 fn media_purpose(purpose: &str) -> bool {
     ["source:", "asset:"].iter().any(|prefix| {
         purpose

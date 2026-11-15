@@ -133,6 +133,35 @@ impl IntoResponse for ApiError {
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         let message = error.to_string();
+        for (code, status) in [
+            ("sticker_preparation_not_found", StatusCode::NOT_FOUND),
+            ("custom_sticker_not_found", StatusCode::NOT_FOUND),
+            ("sticker_revision_mismatch", StatusCode::PRECONDITION_FAILED),
+            ("invalid_sticker_id", StatusCode::BAD_REQUEST),
+            ("invalid_sticker_pack_id", StatusCode::BAD_REQUEST),
+            ("invalid_language", StatusCode::BAD_REQUEST),
+            ("invalid_sticker_placement", StatusCode::BAD_REQUEST),
+            ("sticker_preparation_not_available", StatusCode::CONFLICT),
+            ("sticker_source_message_mismatch", StatusCode::BAD_REQUEST),
+            ("invalid_sticker_source", StatusCode::BAD_REQUEST),
+            ("sticker_preparation_expired", StatusCode::GONE),
+            ("sticker_source_size_limit", StatusCode::PAYLOAD_TOO_LARGE),
+            ("source_size_limit", StatusCode::PAYLOAD_TOO_LARGE),
+            ("upload_in_use", StatusCode::CONFLICT),
+            ("sticker_trim_invalid", StatusCode::BAD_REQUEST),
+            ("invalid_sticker_download", StatusCode::BAD_REQUEST),
+            ("sticker_pack_not_added", StatusCode::CONFLICT),
+            ("sticker_source_unavailable", StatusCode::CONFLICT),
+            (
+                "unsupported_sticker_send_format",
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+            ("sticker_pack_detail_rejected", StatusCode::BAD_GATEWAY),
+        ] {
+            if message == code {
+                return Self(status, code);
+            }
+        }
         if message == "mention_all_forbidden" {
             return Self(StatusCode::FORBIDDEN, "mention_all_forbidden");
         }

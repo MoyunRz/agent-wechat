@@ -9,7 +9,7 @@ mod video;
 mod wxgf;
 
 pub use image::ImageInspection;
-pub use video::inspect_video_container;
+pub use video::{inspect_video_container, inspect_video_reader};
 pub use wxgf::wxgf_preview;
 
 pub const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;

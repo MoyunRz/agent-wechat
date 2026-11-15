@@ -262,6 +262,7 @@ fn param_doc(path: &str, name: &str) -> String {
                 "jobs" => "Job ID.",
                 "groups" => "Group ID.",
                 "friend-requests" => "Contact ID of the applicant who sent the request.",
+                "uploads" => "Upload source ID.",
                 other => panic!("describe the {{id}} parameter after /{other}/"),
             }
         }
