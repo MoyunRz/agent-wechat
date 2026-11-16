@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { IconName } from './Icon.vue'
-import type { StagedAttachment } from '../types'
+import type { MentionOption, StagedAttachment } from '../types'
 import { EMOTICON_LIST } from '../emoticons'
 import Icon from './Icon.vue'
 
@@ -11,11 +11,23 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   sending?: boolean
   placeholder?: string
+  /** 当前引用回复的消息；null 时隐藏引用条。 */
+  replyTo?: { sender: string, preview: string } | null
+  /** 当前会话支持 @ 提及（群聊）。 */
+  mentionAvailable?: boolean
+  /** @ 选择器条目（含「所有人」）；加载完成前为空。 */
+  mentionOptions?: MentionOption[]
+  /** 群成员列表是否仍在加载。 */
+  mentionLoading?: boolean
 }>(), {
   attachments: () => [],
   disabled: false,
   sending: false,
   placeholder: '输入消息',
+  replyTo: null,
+  mentionAvailable: false,
+  mentionOptions: () => [],
+  mentionLoading: false,
 })
 
 const emit = defineEmits<{
@@ -23,12 +35,20 @@ const emit = defineEmits<{
   send: []
   attachFiles: [files: File[]]
   removeAttachment: [id: string]
+  cancelReply: []
+  /** @ 选择器展开时通知父层按需加载群成员。 */
+  mentionOpen: []
 }>()
 
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const composing = ref(false)
 const showEmoticons = ref(false)
+const mentionOpen = ref(false)
+const mentionQuery = ref('')
+const mentionTriggerStart = ref(-1)
+const mentionActive = ref(0)
+let mentionBlurTimer: number | null = null
 
 const canSend = computed(() => {
   return Boolean(props.modelValue.trim()) || props.attachments.length > 0
@@ -68,6 +88,122 @@ async function insertEmoticon(name: string): Promise<void> {
     el.selectionStart = insertAt
     el.selectionEnd = insertAt
   }
+}
+
+// ---- @ 提及选择器 -------------------------------------------------------
+
+function closeMention(): void {
+  mentionOpen.value = false
+  mentionQuery.value = ''
+  mentionTriggerStart.value = -1
+}
+
+function cancelMentionBlur(): void {
+  if (mentionBlurTimer !== null) {
+    window.clearTimeout(mentionBlurTimer)
+    mentionBlurTimer = null
+  }
+}
+
+/** 失焦后延迟关闭，给「点击选择」留出窗口（条目用 mousedown.prevent 保持焦点）。 */
+function closeMentionSoon(): void {
+  cancelMentionBlur()
+  mentionBlurTimer = window.setTimeout(() => {
+    mentionBlurTimer = null
+    closeMention()
+  }, 150)
+}
+
+/**
+ * 检测光标前的 `@关键词` 触发片段：紧跟行首或空白之后、不含提及分隔符 U+2005。
+ * value/caret 缺省时从输入框读取。
+ */
+function detectMention(value?: string, caret?: number): void {
+  cancelMentionBlur()
+  if (!props.mentionAvailable || props.disabled) {
+    closeMention()
+    return
+  }
+  const el = textarea.value
+  const text = value ?? props.modelValue
+  const at = caret ?? el?.selectionStart ?? text.length
+  const match = /(?:^|\s)@([^\u2005]*)$/u.exec(text.slice(0, at))
+  if (!match) {
+    closeMention()
+    return
+  }
+  const wasClosed = !mentionOpen.value
+  mentionOpen.value = true
+  mentionQuery.value = match[1]
+  mentionTriggerStart.value = at - match[1].length - 1
+  mentionActive.value = 0
+  if (wasClosed)
+    emit('mentionOpen')
+}
+
+const MENTION_ITEMS_LIMIT = 50
+
+const mentionItems = computed<MentionOption[]>(() => {
+  const query = mentionQuery.value.trim().toLowerCase()
+  const all = props.mentionOptions.filter(option => option.all)
+  const rest = props.mentionOptions.filter(option => !option.all)
+  const matched = query
+    ? rest.filter(option => option.label.toLowerCase().includes(query) || option.id.toLowerCase().includes(query))
+    : rest
+  const allMatched = query
+    ? all.filter(option => option.label.toLowerCase().includes(query))
+    : all
+  return [...allMatched, ...matched].slice(0, MENTION_ITEMS_LIMIT)
+})
+
+async function selectMention(option: MentionOption): Promise<void> {
+  cancelMentionBlur()
+  const el = textarea.value
+  const value = props.modelValue
+  const caret = el?.selectionStart ?? value.length
+  const start = mentionTriggerStart.value
+  if (start < 0 || start > caret) {
+    closeMention()
+    return
+  }
+  // 提及片段以 U+2005（四分空格）结尾；发送时按该分隔符扫描提及区间。
+  const token = `@${option.label}\u{2005}`
+  emit('update:modelValue', value.slice(0, start) + token + value.slice(caret))
+  const insertAt = start + token.length
+  closeMention()
+  await nextTick()
+  resize()
+  focus()
+  if (el) {
+    el.selectionStart = insertAt
+    el.selectionEnd = insertAt
+  }
+}
+
+/** 工具栏 @ 按钮：在光标处插入 @ 并展开选择器。 */
+async function triggerMentionPicker(): Promise<void> {
+  if (props.disabled || !props.mentionAvailable)
+    return
+  cancelMentionBlur()
+  const el = textarea.value
+  const value = props.modelValue
+  const caret = el?.selectionStart ?? value.length
+  const previous = value[caret - 1] ?? ''
+  const prefix = caret > 0 && !/\s/u.test(previous) ? ' ' : ''
+  emit('update:modelValue', value.slice(0, caret) + prefix + '@' + value.slice(caret))
+  const triggerAt = caret + prefix.length
+  await nextTick()
+  if (el) {
+    el.selectionStart = triggerAt + 1
+    el.selectionEnd = triggerAt + 1
+  }
+  mentionOpen.value = true
+  mentionQuery.value = ''
+  mentionTriggerStart.value = triggerAt
+  mentionActive.value = 0
+  emit('mentionOpen')
+  focus()
+  resize()
 }
 
 function iconFor(kind: StagedAttachment['kind']): IconName {
@@ -122,11 +258,40 @@ function submit(): void {
 }
 
 function onInput(event: Event): void {
-  emit('update:modelValue', (event.target as HTMLTextAreaElement).value)
+  const target = event.target as HTMLTextAreaElement
+  emit('update:modelValue', target.value)
   resize()
+  detectMention(target.value, target.selectionStart ?? undefined)
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  if (mentionOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMention()
+      return
+    }
+    if (event.key === 'ArrowDown' && mentionItems.value.length > 0) {
+      event.preventDefault()
+      mentionActive.value = (mentionActive.value + 1) % mentionItems.value.length
+      return
+    }
+    if (event.key === 'ArrowUp' && mentionItems.value.length > 0) {
+      event.preventDefault()
+      mentionActive.value = (mentionActive.value - 1 + mentionItems.value.length) % mentionItems.value.length
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !composing.value) {
+      const item = mentionItems.value[mentionActive.value]
+      if (item) {
+        event.preventDefault()
+        void selectMention(item)
+        return
+      }
+      // 没有可选条目时收起面板并放行发送。
+      closeMention()
+    }
+  }
   if (event.key === 'Escape' && showEmoticons.value) {
     event.preventDefault()
     closeEmoticons()
@@ -140,9 +305,12 @@ function onKeydown(event: KeyboardEvent): void {
 
 watch(
   () => props.modelValue,
-  async () => {
+  async (value) => {
     await nextTick()
     resize()
+    // 草稿被清空（如发送完成）时收起 @ 选择器。
+    if (!value)
+      closeMention()
   },
 )
 
@@ -162,6 +330,21 @@ defineExpose({ focus })
         accept="image/*,video/*,audio/*"
         @change="onFilesPicked"
       >
+
+      <div v-if="replyTo" class="reply-bar">
+        <Icon name="reply" :size="13" class="reply-bar-icon" />
+        <span class="reply-bar-text">
+          <strong>{{ replyTo.sender }}</strong>{{ replyTo.preview }}
+        </span>
+        <button
+          class="reply-bar-close"
+          type="button"
+          title="取消引用"
+          @click="emit('cancelReply')"
+        >
+          <Icon name="close" :size="12" />
+        </button>
+      </div>
 
       <div v-if="attachments.length > 0" class="staged-list">
         <div v-for="item in attachments" :key="item.id" class="staged-item">
@@ -207,6 +390,32 @@ defineExpose({ focus })
         </div>
       </div>
 
+      <div v-if="mentionOpen" class="mention-panel">
+        <div v-if="mentionLoading && mentionOptions.length === 0" class="mention-empty">
+          <Icon name="refresh" :size="12" class="spin" />
+          成员加载中…
+        </div>
+        <div v-else-if="mentionItems.length === 0" class="mention-empty">
+          没有匹配的成员
+        </div>
+        <div v-else class="mention-list scrollbar-thin">
+          <button
+            v-for="(item, index) in mentionItems"
+            :key="item.id"
+            class="mention-item"
+            :class="{ active: index === mentionActive }"
+            type="button"
+            :title="item.id"
+            @mousedown.prevent
+            @click="selectMention(item)"
+          >
+            <span class="mention-at">@</span>
+            <span class="mention-label">{{ item.label }}</span>
+            <span v-if="item.all" class="mention-tag">全体成员</span>
+          </button>
+        </div>
+      </div>
+
       <textarea
         ref="textarea"
         :value="modelValue"
@@ -216,6 +425,8 @@ defineExpose({ focus })
         spellcheck="false"
         @input="onInput"
         @keydown="onKeydown"
+        @click="detectMention()"
+        @blur="closeMentionSoon"
         @compositionstart="composing = true"
         @compositionend="composing = false"
       />
@@ -241,7 +452,13 @@ defineExpose({ focus })
           >
             <Icon name="paperclip" :size="16" />
           </button>
-          <button class="tool-button" type="button" disabled title="提及成员即将支持">
+          <button
+            class="tool-button"
+            type="button"
+            :title="mentionAvailable ? '提及群成员' : '群聊中可提及成员'"
+            :disabled="disabled || !mentionAvailable"
+            @click="triggerMentionPicker"
+          >
             <Icon name="at" :size="16" />
           </button>
         </div>
@@ -361,6 +578,81 @@ defineExpose({ focus })
   background: transparent;
 }
 
+/* @ 提及选择器：悬浮在输入框上方。 */
+.mention-panel {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: min(264px, calc(100vw - 120px));
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel-elevated);
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+}
+
+.mention-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.mention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 216px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-item:hover,
+.mention-item.active {
+  background: var(--panel-hover);
+}
+
+.mention-at {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mention-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.mention-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 10px;
+}
+
 .tool-button.active {
   background: var(--accent-soft);
   color: var(--text);
@@ -427,6 +719,55 @@ defineExpose({ focus })
   flex-wrap: wrap;
   gap: 6px;
   padding-bottom: 6px;
+}
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 11.5px;
+}
+
+.reply-bar-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.reply-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.reply-bar-text strong {
+  margin-right: 5px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.reply-bar-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.reply-bar-close:hover {
+  color: var(--text-soft);
+  background: var(--panel-hover);
 }
 
 .staged-item {

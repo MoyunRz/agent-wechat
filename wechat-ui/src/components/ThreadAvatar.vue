@@ -74,17 +74,50 @@ async function refreshAvatarOnce(accountId: string, username: string): Promise<b
 const failed = ref(false)
 const refreshAttempted = ref(false)
 const version = ref(0)
+const avatarObjectUrl = ref<string | null>(null)
 let identityToken = 0
+let avatarLoadSeq = 0
 
 const isGroup = computed(() => props.kind === 'group')
 const memberList = computed(() => (props.members ?? []).slice(0, 4))
 const useGrid = computed(() => isGroup.value && memberList.value.length >= 2)
-const avatarIdentity = computed(() => useGrid.value ? '' : (props.username ?? '').trim())
-const avatarUrl = computed(() =>
-  props.imageUrl?.trim()
-  || wechatApi.avatarUrl(props.accountId, avatarIdentity.value, version.value),
-)
-const showImage = computed(() => Boolean(avatarUrl.value) && !failed.value)
+// 群聊同样加载群头像图片（daemon 头像端点对 group 生效）；无图时回退四宫格。
+const avatarIdentity = computed(() => (props.username ?? '').trim())
+const showImage = computed(() => Boolean(avatarObjectUrl.value) && !failed.value)
+
+async function loadAvatarBytes(): Promise<void> {
+  if (!props.accountId || !avatarIdentity.value) {
+    avatarObjectUrl.value = null
+    return
+  }
+  const seq = ++avatarLoadSeq
+  try {
+    // 带全局缓存的加载：视图切换/列表重建时直接复用已缓存的 object URL，不再重复请求。
+    const url = await wechatApi.loadAvatarCached(props.accountId, avatarIdentity.value, version.value)
+    if (seq !== avatarLoadSeq)
+      return
+    avatarObjectUrl.value = url
+    if (!url) {
+      // 缓存里还没有头像：向微信请求一次，成功后重取字节。
+      failed.value = false
+      if (!refreshAttempted.value) {
+        refreshAttempted.value = true
+        const token = identityToken
+        const ok = await ensureAvatarCached(props.accountId, avatarIdentity.value)
+        if (token === identityToken && ok) {
+          version.value = Date.now()
+          void loadAvatarBytes()
+        }
+      }
+      return
+    }
+    failed.value = false
+  }
+  catch {
+    if (seq === avatarLoadSeq)
+      avatarObjectUrl.value = null
+  }
+}
 
 watch(
   () => [props.accountId, avatarIdentity.value, props.imageUrl],
@@ -93,25 +126,14 @@ watch(
     failed.value = false
     refreshAttempted.value = false
     version.value = 0
+    if (props.imageUrl?.trim()) {
+      avatarObjectUrl.value = null
+      return
+    }
+    void loadAvatarBytes()
   },
+  { immediate: true },
 )
-
-async function onAvatarError(): Promise<void> {
-  failed.value = true
-  // 给定 URL 加载失败时不再回退到 hub 头像端点：陌生人不在通讯录，
-  // 那条路径对陌生人也拿不到头像，直接展示首字母占位。
-  if (!avatarIdentity.value || refreshAttempted.value || props.imageUrl?.trim())
-    return
-  refreshAttempted.value = true
-  const token = identityToken
-  const ok = await ensureAvatarCached(props.accountId, avatarIdentity.value)
-  if (token !== identityToken)
-    return
-  if (!ok)
-    return
-  version.value = Date.now()
-  failed.value = false
-}
 
 function gradientFor(name: string): string {
   let hash = 0
@@ -142,7 +164,13 @@ function memberStyle(member: ThreadAvatarMember): Record<string, string> {
     :class="{ 'is-group': isGroup }"
     :style="{ width: `${size}px`, height: `${size}px` }"
   >
-    <div v-if="useGrid" class="member-grid">
+    <img
+      v-if="showImage"
+      :src="avatarObjectUrl ?? undefined"
+      alt=""
+      draggable="false"
+    >
+    <div v-else-if="useGrid" class="member-grid">
       <span
         v-for="member in memberList"
         :key="member.id"
@@ -152,13 +180,6 @@ function memberStyle(member: ThreadAvatarMember): Record<string, string> {
         {{ memberInitial(member) }}
       </span>
     </div>
-    <img
-      v-else-if="showImage"
-      :src="avatarUrl ?? undefined"
-      alt=""
-      draggable="false"
-      @error="onAvatarError"
-    >
     <span v-else class="fallback" :style="fallbackStyle">
       {{ initials(name) }}
     </span>

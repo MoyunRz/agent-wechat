@@ -45,14 +45,22 @@ const normalizedQuery = computed(() => query.value.trim())
 // 群成员等本地发现的联系人该字段为空。两者结合即可只展示真实好友。
 const NON_PERSONAL_CATEGORIES = new Set(['system', 'business', 'openim', 'openimCustomerService', 'group'])
 
+/**
+ * 展示集合。严格模式只显示服务器确认的个人联系人；当 profile 里完全
+ * 没有 localType 确认条目（daemon 的 ModContact 投影未写官方 local_type 位，
+ * 联系人行全部由消息投影创建）时降级为显示所有个人类联系人，
+ * 群聊与公众号/企业微信/系统账号仍然排除。
+ */
 const sortedContacts = computed(() => {
-  return contacts.value
-    .filter((contact) => {
-      const category = contact.classification?.category ?? 'unknown'
-      if (NON_PERSONAL_CATEGORIES.has(category))
-        return false
-      return contact.localType != null
-    })
+  const personal = contacts.value.filter((contact) => {
+    const category = contact.classification?.category ?? 'unknown'
+    if (NON_PERSONAL_CATEGORIES.has(category))
+      return false
+    return !(contact.username ?? '').endsWith('@chatroom')
+  })
+  const confirmed = personal.filter(contact => contact.localType != null)
+  const visible = confirmed.length > 0 ? confirmed : personal
+  return visible
     .sort((left, right) => contactName(left).localeCompare(contactName(right), 'zh-Hans-CN'))
 })
 
@@ -178,10 +186,19 @@ async function loadContacts(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const response = await wechatApi.listContacts(props.account.id, normalizedQuery.value, 200)
+    // daemon 单页上限 200：游标翻页拉全量，搜索词由服务端过滤。
+    const items: Contact[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 10; page++) {
+      const response = await wechatApi.listContacts(props.account.id, normalizedQuery.value, 200, cursor)
+      items.push(...(response.items ?? []))
+      cursor = response.nextCursor ?? null
+      if (!cursor)
+        break
+    }
     if (token !== requestToken)
       return
-    contacts.value = response.items ?? []
+    contacts.value = items
   }
   catch (value) {
     if (token !== requestToken)

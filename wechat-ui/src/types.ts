@@ -1,4 +1,4 @@
-export type ThreadFilter = 'all' | 'unread' | 'groups'
+export type ThreadFilter = 'all' | 'unread' | 'direct' | 'groups' | 'mini' | 'official'
 
 export type RailView = 'chats' | 'contacts'
 
@@ -38,6 +38,29 @@ export type ThreadPreview = {
 export type ThreadAvatarMember = {
   id: string
   displayName: string
+}
+
+/** 群成员（catalog 列表）；mentionName 是服务端写入提及名单时使用的名字。 */
+export type GroupMember = {
+  id: string
+  username: string
+  displayName?: string | null
+  roomDisplayName?: string | null
+  mentionName?: string | null
+}
+
+/** 发送文本携带的提及信息（仅群聊）；positions 为正文里的 UTF-16 区间。 */
+export type TextMentions = {
+  userIds?: string[]
+  all?: boolean
+  positions?: Array<{ start: number, end: number, index: number }>
+}
+
+/** @ 选择器条目；all 表示「@所有人」（需要群主/管理员权限）。 */
+export type MentionOption = {
+  id: string
+  label: string
+  all?: boolean
 }
 
 export type Thread = {

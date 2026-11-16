@@ -34,6 +34,7 @@ export type IconName =
   | 'voice-play'
   | 'pause'
   | 'smile'
+  | 'reply'
 
 const props = withDefaults(defineProps<{
   name: IconName
@@ -77,6 +78,7 @@ const paths: Record<IconName, string[]> = {
   'voice-play': ['M6 6.5v11l8-5.5-8-5.5Z', 'M16 9a5 5 0 0 1 0 6', 'M19 6.5a9 9 0 0 1 0 11'],
   pause: ['M9 6v12', 'M15 6v12'],
   smile: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M9 10h.01', 'M15 10h.01', 'M8.5 14.5a4.5 4.5 0 0 0 7 0'],
+  reply: ['m9 14-4-4 4-4', 'M5 10h9a6 6 0 0 1 6 6v4'],
 }
 
 const current = computed(() => paths[props.name] ?? [])

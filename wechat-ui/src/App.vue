@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { newIdempotencyKey, wechatApi, WechatApiError } from './api'
 import { sendFailureMessage, userFacingErrorMessage } from './errors'
 import { consumeEventStream } from './events'
@@ -8,6 +8,7 @@ import {
   connectionLabel,
   connectionTone,
   dayKey,
+  formatListTime,
   previewText,
   threadKindLabel,
   threadName,
@@ -15,16 +16,19 @@ import {
 import type {
   AccountSummary,
   Contact,
+  GroupMember,
   LocalMedia,
   LocalMessage,
   LoginAttempt,
   MediaAsset,
   MediaKind,
+  MentionOption,
   Message,
   MessageMedia,
   MessageMediaMap,
   RailView,
   StagedAttachment,
+  TextMentions,
   Thread,
   ThreadFilter,
   ThemeMode,
@@ -42,6 +46,10 @@ import ThreadAvatar from './components/ThreadAvatar.vue'
 import ThreadList from './components/ThreadList.vue'
 
 const PAGE_SIZE = 50
+/** 打开会话时拉取的最近消息条数；更早的消息滚动到顶部时按游标懒加载。 */
+const MESSAGE_PAGE_SIZE = 100
+/** 消息提示卡片只覆盖最近窗口内的消息；更早的历史回灌一律静默。 */
+const TOAST_RECENT_WINDOW_MS = 10 * 60 * 1000
 const UI_SETTINGS_KEY = 'vane.wechat.ui-settings'
 const DEFAULT_BUBBLE_FONT_SIZE = 13.5
 // 新消息卡片默认停留时长（毫秒），可在「界面设置」中调整。
@@ -141,6 +149,7 @@ function loadUiSettings(): {
   bubbleInColor: string
   bubbleOutColor: string
   toastDurationMs: number
+  toastEnabled: boolean
 } {
   try {
     const raw = window.localStorage.getItem(UI_SETTINGS_KEY)
@@ -152,6 +161,7 @@ function loadUiSettings(): {
         bubbleInColor: '',
         bubbleOutColor: '',
         toastDurationMs: DEFAULT_TOAST_DURATION,
+        toastEnabled: true,
       }
     }
     const parsed = JSON.parse(raw) as {
@@ -161,6 +171,7 @@ function loadUiSettings(): {
       bubbleInColor?: unknown
       bubbleOutColor?: unknown
       toastDurationMs?: unknown
+      toastEnabled?: unknown
     }
     const themeId = typeof parsed.themeId === 'string' && UI_THEMES.some(theme => theme.id === parsed.themeId)
       ? parsed.themeId
@@ -179,6 +190,7 @@ function loadUiSettings(): {
       bubbleInColor: normalizeHexColor(parsed.bubbleInColor),
       bubbleOutColor: normalizeHexColor(parsed.bubbleOutColor),
       toastDurationMs: toastDuration,
+      toastEnabled: parsed.toastEnabled !== false,
     }
   }
   catch {
@@ -189,6 +201,7 @@ function loadUiSettings(): {
       bubbleInColor: '',
       bubbleOutColor: '',
       toastDurationMs: DEFAULT_TOAST_DURATION,
+      toastEnabled: true,
     }
   }
 }
@@ -200,6 +213,7 @@ const themeMode = ref<ThemeMode>(initialUiSettings.themeMode)
 const bubbleInColor = ref(initialUiSettings.bubbleInColor)
 const bubbleOutColor = ref(initialUiSettings.bubbleOutColor)
 const toastDurationMs = ref(initialUiSettings.toastDurationMs)
+const toastEnabled = ref(initialUiSettings.toastEnabled)
 
 function applyUiSettings(): void {
   const theme = UI_THEMES.find(item => item.id === themeId.value) ?? UI_THEMES[0]
@@ -243,6 +257,7 @@ function persistUiSettings(): void {
       bubbleInColor: bubbleInColor.value,
       bubbleOutColor: bubbleOutColor.value,
       toastDurationMs: toastDurationMs.value,
+      toastEnabled: toastEnabled.value,
     }))
   }
   catch {
@@ -252,7 +267,7 @@ function persistUiSettings(): void {
 
 applyUiSettings()
 
-watch([themeId, bubbleFontSize, themeMode, bubbleInColor, bubbleOutColor, toastDurationMs], () => {
+watch([themeId, bubbleFontSize, themeMode, bubbleInColor, bubbleOutColor, toastDurationMs, toastEnabled], () => {
   applyUiSettings()
   persistUiSettings()
 })
@@ -267,6 +282,7 @@ const loginAttempt = ref<LoginAttempt | null>(null)
 const loginBusy = ref(false)
 const loginError = ref('')
 const qrFailed = ref(false)
+const qrObjectUrl = ref<string | null>(null)
 const qrNonce = ref(0)
 const loggingOut = ref(false)
 const accountActionError = ref('')
@@ -291,7 +307,329 @@ const olderLoading = ref(false)
 const messagesCursor = ref<string | null>(null)
 const messageError = ref('')
 
+// 会话消息内存缓存：切换会话回来先展示缓存（秒开、无骨架屏），再后台静默刷新。
+// 缓存保存的是 messages 数组的活引用，刷新/合并后自动保持最新；LRU 上限 24 个会话。
+const THREAD_CACHE_LIMIT = 24
+const threadMessagesCache = new Map<string, { items: LocalMessage[], cursor: string | null }>()
+
+function cacheThreadMessages(threadId: string): void {
+  if (!threadId)
+    return
+  threadMessagesCache.delete(threadId)
+  threadMessagesCache.set(threadId, { items: messages.value, cursor: messagesCursor.value })
+  while (threadMessagesCache.size > THREAD_CACHE_LIMIT) {
+    const oldest = threadMessagesCache.keys().next().value
+    if (oldest === undefined)
+      break
+    threadMessagesCache.delete(oldest)
+  }
+}
+
+// 页面刷新后的启动缓存：先把上次保存的会话列表/联系人目录画出来，再后台刷新替换。
+const UI_CACHE_KEY = 'vane.wechat.ui-cache'
+
+function loadCachedSessionData(): void {
+  try {
+    const raw = window.localStorage.getItem(UI_CACHE_KEY)
+    if (!raw)
+      return
+    const parsed = JSON.parse(raw) as {
+      threads?: unknown
+      contacts?: unknown
+      friends?: unknown
+    }
+    if (Array.isArray(parsed.threads) && threads.value.length === 0)
+      threads.value = parsed.threads as Thread[]
+    if (parsed.contacts && typeof parsed.contacts === 'object' && contactNames.value.size === 0) {
+      contactNames.value = new Map(Object.entries(parsed.contacts as Record<string, string>))
+      applyContactNames()
+    }
+    if (Array.isArray(parsed.friends) && friendNames.value.size === 0)
+      friendNames.value = new Set(parsed.friends as string[])
+  }
+  catch {
+    // 缓存损坏时忽略，走正常加载。
+  }
+}
+
+function persistSessionData(): void {
+  try {
+    window.localStorage.setItem(UI_CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      threads: threads.value.slice(0, 100),
+      contacts: Object.fromEntries(contactNames.value),
+      friends: [...friendNames.value].slice(0, 2000),
+    }))
+  }
+  catch {
+    // 隐私模式等场景下写入失败不影响当前使用。
+  }
+}
+
 const draft = ref('')
+// 当前引用回复的消息：hover 气泡上的引用按钮设置；发送或切换会话后清空。
+const replyTo = ref<LocalMessage | null>(null)
+
+// 会话内历史搜索：头部 🔍 展开，daemon 全量检索后按当前会话过滤，点击结果定位并高亮。
+const THREAD_SEARCH_RESULT_LIMIT = 60
+const THREAD_SEARCH_MAX_PAGES = 8
+const threadSearchOpen = ref(false)
+const threadSearchQuery = ref('')
+const threadSearchResults = ref<LocalMessage[]>([])
+const threadSearching = ref(false)
+const threadSearchDone = ref(false)
+const threadSearchInput = ref<HTMLInputElement | null>(null)
+const messageHighlightId = ref<string | null>(null)
+let threadSearchToken = 0
+let threadSearchDebounce: number | null = null
+
+function threadSearchMatches(item: LocalMessage, keyword: string): boolean {
+  const text = item.body?.toLowerCase() ?? ''
+  return text.includes(keyword)
+}
+
+function threadSearchSender(item: LocalMessage): string {
+  if (item.direction === 'outgoing')
+    return '我'
+  const thread = activeThread.value
+  const member = thread?.avatarMembers?.find(candidate => candidate.id === item.senderId)
+  return member?.displayName || item.senderId || '对方'
+}
+
+function threadSearchSnippet(item: LocalMessage): string {
+  const text = item.body?.trim() ?? ''
+  if (text)
+    return text.slice(0, 120)
+  switch (item.type) {
+    case 3: return '[图片]'
+    case 34: return '[语音]'
+    case 43: return '[视频]'
+    case 47: return '[表情]'
+    default: return '[消息]'
+  }
+}
+
+async function runThreadSearch(): Promise<void> {
+  const current = account.value
+  const threadId = activeThreadId.value
+  const keyword = threadSearchQuery.value.trim().toLowerCase()
+  threadSearchResults.value = []
+  if (!current || !threadId || !keyword) {
+    threadSearching.value = false
+    return
+  }
+  const seq = ++threadSearchToken
+  threadSearching.value = true
+  threadSearchDone.value = false
+  try {
+    const results = new Map<string, LocalMessage>()
+    const collect = (items: LocalMessage[]): void => {
+      for (const item of items) {
+        if (item.threadId === threadId && threadSearchMatches(item, keyword))
+          results.set(item.id, item)
+      }
+      threadSearchResults.value = [...results.values()].sort(compareMessages)
+    }
+    // 1) 先搜当前已加载的消息，立刻出结果。
+    collect(messages.value)
+    if (results.size >= THREAD_SEARCH_RESULT_LIMIT)
+      return
+    // 2) 服务端全量检索（daemon 不支持按会话过滤，客户端过滤当前会话），自动翻页。
+    let cursor: string | null = null
+    for (let page = 0; page < THREAD_SEARCH_MAX_PAGES; page++) {
+      if (seq !== threadSearchToken || disposed)
+        return
+      const response = await wechatApi.searchMessages(current.id, keyword, 200, cursor)
+      collect(response.items ?? [])
+      if (results.size >= THREAD_SEARCH_RESULT_LIMIT)
+        return
+      cursor = response.nextCursor ?? null
+      if (!cursor) {
+        threadSearchDone.value = true
+        return
+      }
+    }
+    threadSearchDone.value = true
+  }
+  catch {
+    // 搜索失败保持当前结果；输入变化时会重新触发。
+  }
+  finally {
+    if (seq === threadSearchToken)
+      threadSearching.value = false
+  }
+}
+
+function toggleThreadSearch(): void {
+  threadSearchOpen.value = !threadSearchOpen.value
+  if (threadSearchOpen.value) {
+    void nextTick(() => threadSearchInput.value?.focus())
+  }
+  else {
+    threadSearchQuery.value = ''
+    threadSearchResults.value = []
+    messageHighlightId.value = null
+  }
+}
+
+async function jumpToSearchResult(item: LocalMessage): Promise<void> {
+  threadSearchOpen.value = false
+  if (activeThreadId.value !== item.threadId)
+    return
+  // 目标消息不在已加载区间时，自动向上翻历史加载（上限 20 页）。
+  let hops = 0
+  while (!messages.value.some(candidate => candidate.id === item.id) && messagesCursor.value && hops < 20) {
+    await loadOlderMessages()
+    hops += 1
+  }
+  if (!messages.value.some(candidate => candidate.id === item.id))
+    return
+  await nextTick()
+  messageList.value?.scrollToMessage(item.id)
+  messageHighlightId.value = item.id
+  window.setTimeout(() => {
+    messageHighlightId.value = null
+  }, 2400)
+}
+
+watch(threadSearchQuery, () => {
+  if (threadSearchDebounce !== null)
+    window.clearTimeout(threadSearchDebounce)
+  threadSearchDebounce = window.setTimeout(() => {
+    threadSearchDebounce = null
+    void runThreadSearch()
+  }, 320)
+})
+
+// ---- @ 提及（群聊）-----------------------------------------------------
+
+const GROUP_MEMBERS_CACHE_LIMIT = 40
+const groupMembersCache = new Map<string, GroupMember[]>()
+const groupMembersLoading = ref(false)
+let groupMembersRequestId = 0
+
+const activeThreadIsGroup = computed(() => {
+  const thread = activeThread.value
+  return Boolean(thread && thread.kind === 'group' && thread.peerId.endsWith('@chatroom'))
+})
+
+const mentionOptions = computed<MentionOption[]>(() => {
+  if (!activeThreadIsGroup.value || !activeThreadId.value)
+    return []
+  const members = groupMembersCache.get(activeThreadId.value) ?? []
+  const options = members.map((member) => {
+    const label = member.mentionName?.trim() || member.displayName?.trim() || member.username
+    return { id: member.id, label }
+  })
+  return [{ id: 'notify@all', label: '所有人', all: true }, ...options]
+})
+
+const mentionLoading = computed(() => {
+  return activeThreadIsGroup.value
+    && groupMembersLoading.value
+    && Boolean(activeThreadId.value) && !groupMembersCache.has(activeThreadId.value ?? '')
+})
+
+/** 拉取当前群的成员列表（本地 catalog 读，带游标翻页），结果按会话缓存。 */
+async function ensureGroupMembers(threadId: string): Promise<void> {
+  const current = account.value
+  if (!current || !threadId.endsWith('@chatroom'))
+    return
+  if (groupMembersCache.has(threadId) || groupMembersLoading.value)
+    return
+  groupMembersLoading.value = true
+  const requestId = ++groupMembersRequestId
+  try {
+    const members: GroupMember[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 3; page++) {
+      const response = await wechatApi.listGroupMembers(current.id, threadId, 200, cursor)
+      members.push(...(response.items ?? []))
+      cursor = response.nextCursor ?? null
+      if (!cursor)
+        break
+    }
+    if (requestId === groupMembersRequestId) {
+      if (groupMembersCache.size >= GROUP_MEMBERS_CACHE_LIMIT) {
+        const oldest = groupMembersCache.keys().next().value
+        if (oldest !== undefined)
+          groupMembersCache.delete(oldest)
+      }
+      groupMembersCache.set(threadId, members)
+    }
+  }
+  catch {
+    // 群成员加载失败时 @ 选择器显示为空列表，不影响其他功能。
+  }
+  finally {
+    if (requestId === groupMembersRequestId)
+      groupMembersLoading.value = false
+  }
+}
+
+/**
+ * 从草稿文本扫描提及片段（`@名字\u{2005}`，仅选择器插入的文本带 U+2005 结尾），
+ * 与成员表匹配后生成服务端契约的 mentions。混用 @所有人 时按 all 发送。
+ */
+function buildMentions(text: string, options: MentionOption[]): TextMentions | undefined {
+  const spans: Array<{ start: number, end: number, option: MentionOption }> = []
+  for (const match of text.matchAll(/@([^\u2005]+)\u2005/gu)) {
+    const option = options.find(candidate => candidate.label === match[1])
+    if (option)
+      spans.push({ start: match.index, end: match.index + match[0].length, option })
+  }
+  if (spans.length === 0)
+    return undefined
+  if (spans.some(span => span.option.all)) {
+    return {
+      all: true,
+      positions: spans.map(span => ({ start: span.start, end: span.end, index: 0 })),
+    }
+  }
+  const userIds: string[] = []
+  const indexByUser = new Map<string, number>()
+  const positions = spans.map((span) => {
+    let index = indexByUser.get(span.option.id)
+    if (index === undefined) {
+      index = userIds.length
+      indexByUser.set(span.option.id, index)
+      userIds.push(span.option.id)
+    }
+    return { start: span.start, end: span.end, index }
+  })
+  return { userIds, positions }
+}
+
+/** 引用条展示：发送者显示名 + 内容预览。 */
+const replyToDisplay = computed(() => {
+  const message = replyTo.value
+  if (!message)
+    return null
+  const text = message.body?.trim() ?? ''
+  const preview = text || (message.type === 3
+    ? '[图片]'
+    : message.type === 34
+      ? '[语音]'
+      : message.type === 43
+        ? '[视频]'
+        : message.type === 47
+          ? '[表情]'
+          : '[消息]')
+  const sender = message.direction === 'outgoing'
+    ? '我'
+    : (activeThread.value?.avatarMembers?.find(item => item.id === message.senderId)?.displayName
+      || message.senderId
+      || '对方')
+  return { sender, preview: preview.slice(0, 80) }
+})
+
+function startReply(message: LocalMessage): void {
+  if (!message.serverId?.trim())
+    return
+  replyTo.value = message
+  composer.value?.focus()
+}
+
 const stagedAttachments = ref<StagedAttachment[]>([])
 const localMediaUrls = new Set<string>()
 const contactDialogOpen = ref(false)
@@ -326,6 +664,7 @@ let mediaRetryTimer: number | null = null
 
 const messageList = ref<{
   scrollToBottom: (force?: boolean) => void
+  scrollToMessage: (id: string) => void
   isAtBottom: () => boolean
 } | null>(null)
 const composer = ref<{ focus: () => void } | null>(null)
@@ -341,7 +680,10 @@ const activeThread = computed(() => {
 /** 已确认好友的用户名集合（localType 非空 = 微信服务器通讯录同步确认）。 */
 const friendNames = ref<Set<string>>(new Set())
 
-/** 单聊对方还不是好友时显示顶部提醒。 */
+/** 通讯录目录：username → 展示名，用于在服务端资料同步完成前快速显示名字。 */
+const contactNames = ref<Map<string, string>>(new Map())
+
+/** 单聊对方还不是好友时显示顶部提醒；公众号/小程序类会话无需好友关系，不提醒。 */
 const peerIsStranger = computed(() => {
   const thread = activeThread.value
   if (!thread || thread.kind !== 'direct')
@@ -349,26 +691,79 @@ const peerIsStranger = computed(() => {
   const peer = (thread.peerId || thread.id).trim()
   if (!peer)
     return false
+  // 公众号（gh_）与小程序/OpenIM 客服会话不依赖好友关系，保持界面安静。
+  if (peer.startsWith('gh_') || peer.endsWith('@openim'))
+    return false
   return !friendNames.value.has(peer)
 })
 
-async function loadFriendSet(): Promise<void> {
+/** 个人类联系人的共同判据：排除公众号/企业微信/系统/群分类。 */
+function isPersonalCategory(contact: Contact): boolean {
+  const category = contact.classification?.category ?? 'unknown'
+  return !NON_PERSONAL_CATEGORIES.has(category)
+}
+
+const NON_PERSONAL_CATEGORIES = new Set(['system', 'business', 'openim', 'openimCustomerService', 'group'])
+
+/**
+ * 好友名字典（用于会话名覆盖与陌生人横幅判断）。
+ * daemon 单页上限 200，这里游标翻页拉全量。
+ * 降级：当前 profile 里所有联系人的 localType 都为空（daemon ModContact 投影
+ * 尚未写官方 local_type 位）时，把个人类联系人都视为已知联系人，避免
+ * 通讯录与陌生人横幅完全失效；一旦出现确认条目则严格只认确认数据。
+ */
+async function loadContactDirectory(): Promise<void> {
   const current = account.value
   if (!current?.authenticated)
     return
   try {
-    const response = await wechatApi.listContacts(current.id, '', 200)
-    const next = new Set<string>()
-    for (const contact of response.items ?? []) {
-      if (contact.localType != null)
-        next.add(contact.username || contact.id)
+    const items: Contact[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 10; page++) {
+      const response = await wechatApi.listContacts(current.id, '', 200, cursor)
+      items.push(...(response.items ?? []))
+      cursor = response.nextCursor ?? null
+      if (!cursor)
+        break
     }
-    friendNames.value = next
+    const confirmedFriends = items.filter(item => item.localType != null && isPersonalCategory(item))
+    const known = confirmedFriends.length > 0
+      ? confirmedFriends
+      : items.filter(item => isPersonalCategory(item) && !(item.username ?? '').endsWith('@chatroom'))
+    const friends = new Set<string>()
+    const names = new Map<string, string>()
+    for (const contact of known) {
+      const key = contact.username || contact.id
+      if (!key)
+        continue
+      friends.add(key)
+      const display = contact.displayName?.trim() || contact.nickname?.trim() || ''
+      if (display && display !== key)
+        names.set(key, display)
+    }
+    friendNames.value = friends
+    contactNames.value = names
+    applyContactNames()
+    persistSessionData()
   }
   catch {
     // 好友集合加载失败不阻塞聊天；横幅宁可多显示也不误隐藏。
     if (friendNames.value.size === 0)
       friendNames.value = new Set()
+  }
+}
+
+/** 服务端会话摘要的 displayName 在资料同步完成前可能是原始 ID；用本地通讯录目录先行覆盖。 */
+function applyContactNames(): void {
+  if (contactNames.value.size === 0 || threads.value.length === 0)
+    return
+  for (const thread of threads.value) {
+    if (thread.isDraft)
+      continue
+    const current = thread.displayName?.trim() ?? ''
+    const resolved = contactNames.value.get(thread.peerId || thread.id)
+    if (resolved && current !== resolved)
+      thread.displayName = resolved
   }
 }
 
@@ -399,20 +794,44 @@ const connectionState = computed(() => {
   return connectionTone(current.connection, current.authenticated)
 })
 
-const qrUrl = computed(() => {
+let qrLoadSeq = 0
+
+function setQrObjectUrl(url: string | null): void {
+  if (qrObjectUrl.value && qrObjectUrl.value !== url)
+    URL.revokeObjectURL(qrObjectUrl.value)
+  qrObjectUrl.value = url
+}
+
+async function loadQrImage(): Promise<void> {
   const current = account.value
   const attempt = loginAttempt.value
-  if (!current || !attempt)
-    return null
-  if (!attempt.result?.qrAvailable && attempt.state !== 'awaiting_scan')
-    return null
-  return wechatApi.qrUrl(
-    current.id,
-    attempt.id,
-    attempt.result?.qrGeneration ?? 0,
-    qrNonce.value,
-  )
-})
+  if (!current || !attempt) {
+    setQrObjectUrl(null)
+    return
+  }
+  // 与旧 qrUrl 判定一致：仅当二维码就绪时取图。
+  if (!attempt.result?.qrAvailable && attempt.state !== 'awaiting_scan') {
+    setQrObjectUrl(null)
+    return
+  }
+  const generation = attempt.result?.qrGeneration ?? 0
+  const seq = ++qrLoadSeq
+  try {
+    const url = await wechatApi.loadLoginQr(current.id, attempt.id, generation)
+    if (seq !== qrLoadSeq) {
+      URL.revokeObjectURL(url)
+      return
+    }
+    setQrObjectUrl(url)
+    qrFailed.value = false
+  }
+  catch {
+    if (seq === qrLoadSeq) {
+      setQrObjectUrl(null)
+      qrFailed.value = true
+    }
+  }
+}
 
 const streamLabel = computed(() => {
   if (streamStatus.value === 'live')
@@ -531,11 +950,14 @@ async function bootstrap(): Promise<void> {
   booting.value = true
   bootError.value = ''
   try {
+    // 先用上次保存的列表/目录瞬时铺底，网络刷新后自动替换。
+    loadCachedSessionData()
     account.value = await ensureAccount()
     if (account.value.authenticated) {
       await loadSelfProfile()
       await loadThreads()
-      void loadFriendSet()
+      void loadContactDirectory()
+      void startCatalogSync()
       startStream()
     }
     scheduleAccountPoll()
@@ -594,6 +1016,14 @@ function handleSignedOut(): void {
   threads.value = []
   revokeAllLocalMedia()
   clearMessageMedia()
+  threadMessagesCache.clear()
+  replyTo.value = null
+  try {
+    window.localStorage.removeItem(UI_CACHE_KEY)
+  }
+  catch {
+    // 清理失败不影响登出流程。
+  }
   messages.value = []
   activeThreadId.value = null
   messagesCursor.value = null
@@ -618,9 +1048,30 @@ async function afterAuthenticated(): Promise<void> {
   loginError.value = ''
   qrFailed.value = false
   await loadSelfProfile()
+  // 分阶段加载：先出会话列表，再补联系人资料（名字/头像），最后由用户打开会话时拉取历史消息。
   await loadThreads()
-  void loadFriendSet()
+  void loadContactDirectory()
+  void startCatalogSync()
   startStream()
+}
+
+/** 让服务器开始同步联系人目录与群资料；完成后经 SSE contacts.updated/group.updated 事件驱动界面刷新。 */
+async function startCatalogSync(): Promise<void> {
+  const current = account.value
+  if (!current?.authenticated)
+    return
+  try {
+    await wechatApi.syncContacts(current.id)
+  }
+  catch {
+    // 目录同步失败不阻塞界面；后续 contacts.updated 事件或手动刷新仍会补齐。
+  }
+  try {
+    await wechatApi.syncGroups(current.id)
+  }
+  catch {
+    // 群资料同步同理。
+  }
 }
 
 async function refreshAccount(): Promise<void> {
@@ -768,9 +1219,10 @@ function retryQr(): void {
 }
 
 watch(
-  () => [loginAttempt.value?.id, loginAttempt.value?.result?.qrGeneration],
+  () => [account.value?.id, loginAttempt.value?.id, loginAttempt.value?.result?.qrGeneration, qrNonce.value],
   () => {
     qrFailed.value = false
+    void loadQrImage()
   },
 )
 
@@ -800,6 +1252,8 @@ async function loadThreads(): Promise<void> {
       threads.value = [draft, ...items]
     else
       threads.value = items
+    applyContactNames()
+    persistSessionData()
     reconcileActiveThread()
   }
   catch (error) {
@@ -815,6 +1269,10 @@ function reconcileActiveThread(): void {
     ? threads.value.find(thread => thread.id === activeThreadId.value)
     : null
   if (existing)
+    return
+  // 分阶段加载：进入应用时不自动打开会话、不拉取历史消息；
+  // 只有已打开的会话被上游移除时，才回退选中列表第一条。
+  if (!activeThreadId.value)
     return
   const first = threads.value[0]
   if (first) {
@@ -841,10 +1299,28 @@ async function selectThread(thread: Thread): Promise<void> {
   thread.unreadCount = 0
   unseenBelow.value = 0
   revokeAllLocalMedia()
-  messages.value = []
-  messagesCursor.value = null
+  replyTo.value = null
+  threadSearchOpen.value = false
+  threadSearchQuery.value = ''
+  threadSearchResults.value = []
+  messageHighlightId.value = null
   messageError.value = ''
-  await fetchThreadMessages(thread.id, 'reset')
+  // 群聊会话后台预取成员列表，@ 选择器即开即用。
+  void ensureGroupMembers(thread.id)
+  // 缓存命中：先展示缓存内容（秒开），再后台静默刷新；未命中才走加载流程。
+  const cached = threadMessagesCache.get(thread.id)
+  if (cached) {
+    threadMessagesCache.delete(thread.id)
+    threadMessagesCache.set(thread.id, cached)
+    messages.value = cached.items
+    messagesCursor.value = cached.cursor
+    void fetchThreadMessages(thread.id, 'refresh')
+  }
+  else {
+    messages.value = []
+    messagesCursor.value = null
+    await fetchThreadMessages(thread.id, 'reset')
+  }
   markThreadRead(thread)
   composer.value?.focus()
 }
@@ -993,7 +1469,7 @@ async function fetchThreadMessages(threadId: string, mode: 'reset' | 'refresh' |
 
   try {
     const cursor = mode === 'older' ? messagesCursor.value : undefined
-    const response = await wechatApi.listMessages(current.id, threadId, PAGE_SIZE, cursor)
+    const response = await wechatApi.listMessages(current.id, threadId, MESSAGE_PAGE_SIZE, cursor)
     if (requestId !== activeMessageRequest || activeThreadId.value !== threadId)
       return
 
@@ -1013,6 +1489,7 @@ async function fetchThreadMessages(threadId: string, mode: 'reset' | 'refresh' |
         messagesCursor.value = response.nextCursor ?? null
     }
 
+    cacheThreadMessages(threadId)
     void loadMediaForMessages(messages.value)
   }
   catch (error) {
@@ -1136,16 +1613,21 @@ function setMessageMedia(entry: MessageMedia): void {
   }
 }
 
-async function requestTransferOnce(accountId: string, messageId: string): Promise<void> {
-  if (mediaTransferRequested.has(messageId))
+async function requestTransferOnce(
+  accountId: string,
+  messageId: string,
+  quality: 'best' | 'thumbnail' | 'normal' = 'best',
+): Promise<void> {
+  const requestKey = `${messageId}:${quality}`
+  if (mediaTransferRequested.has(requestKey))
     return
-  mediaTransferRequested.add(messageId)
+  mediaTransferRequested.add(requestKey)
   try {
-    await wechatApi.requestMediaTransfer(accountId, messageId)
+    await wechatApi.requestMediaTransfer(accountId, messageId, quality)
   }
   catch {
     // 下载授权失败时保留占位，后续查询到 pending 仍可再次尝试。
-    mediaTransferRequested.delete(messageId)
+    mediaTransferRequested.delete(requestKey)
   }
 }
 
@@ -1212,7 +1694,9 @@ async function lookupMediaBatch(accountId: string, messageIds: string[]): Promis
       })
       if (state === 'pending') {
         pendingFound = true
-        void requestTransferOnce(accountId, id)
+        // 视频只自动下载缩略图（首帧海报）；完整视频等用户点击播放时再取。
+        const hasVideo = assets.some(asset => (asset.kind ?? '').toLowerCase().includes('video'))
+        void requestTransferOnce(accountId, id, hasVideo ? 'thumbnail' : 'best')
       }
       else {
         mediaRetryCounts.delete(id)
@@ -1379,8 +1863,15 @@ async function sendTextMessage(current: AccountSummary, thread: Thread, text: st
   messages.value = [...messages.value, local]
   // 数组读取返回的是响应式代理；后续必须改这个代理，直接改 local 原生对象不会触发视图。
   const pendingMessage = messages.value[messages.value.length - 1]
+  // 引用回复：被引用消息必须有平台权威 serverId 才能发送引用。
+  const quoted = replyTo.value?.serverId?.trim()
+    ? { messageId: replyTo.value.id, serverId: replyTo.value.serverId.trim() }
+    : undefined
+  replyTo.value = null
+  // @ 提及：仅群聊且草稿里含选择器插入的提及片段时携带。
+  const mentions = buildMentions(text, mentionOptions.value)
   try {
-    const intent = await wechatApi.sendText(current.id, thread.id, text)
+    const intent = await wechatApi.sendText(current.id, thread.id, text, { quote: quoted, mentions })
     pendingMessage.sendId = intent.id
     pendingMessage.sendState = intent.state
     if (intent.state === 'accepted') {
@@ -1642,10 +2133,20 @@ function dismissToast(id: string): void {
 }
 
 function pushIncomingToast(threadId: string): void {
+  if (!toastEnabled.value)
+    return
   const thread = threads.value.find(item => item.id === threadId)
   if (!thread)
     return
   if ((thread.lastMessage?.direction ?? '') === 'outgoing')
+    return
+  // 没读过才提示；当前打开的会话已标记已读，不会到这里。
+  if ((thread.unreadCount ?? 0) <= 0)
+    return
+  // 只提示最新消息：会话最新一条消息必须足够新。登录时的历史回灌
+  // （哪怕事件是刚落库的）只要最新消息超出窗口就不弹，避免整屏历史轰炸。
+  const latestAt = Date.parse(thread.lastMessage?.createdAt ?? '')
+  if (!Number.isFinite(latestAt) || Date.now() - latestAt > TOAST_RECENT_WINDOW_MS)
     return
   const preview = previewText(thread).trim()
   if (!preview)
@@ -1719,6 +2220,8 @@ function handleStreamEvent(event: WechatEvent): void {
 
   if (kind === 'thread.updated' || kind === 'contacts.updated' || kind === 'group.updated') {
     scheduleThreadRefresh()
+    if (kind === 'contacts.updated')
+      void loadContactDirectory()
     return
   }
 
@@ -1759,6 +2262,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true
+  setQrObjectUrl(null)
   clearTimer(accountTimer)
   clearTimer(loginTimer)
   clearTimer(threadsTimer)
@@ -1795,7 +2299,7 @@ onBeforeUnmount(() => {
       v-else-if="account && !account.authenticated"
       :account="account"
       :attempt="loginAttempt"
-      :qr-url="qrUrl"
+      :qr-url="qrObjectUrl"
       :qr-failed="qrFailed"
       :busy="loginBusy"
       :error="loginError"
@@ -1815,6 +2319,7 @@ onBeforeUnmount(() => {
         v-model:bubble-in-color="bubbleInColor"
         v-model:bubble-out-color="bubbleOutColor"
         v-model:toast-duration-ms="toastDurationMs"
+        v-model:toast-enabled="toastEnabled"
         :account="account"
         :account-name="selfName || '微信'"
         :account-refreshing="manualRefreshing"
@@ -1824,28 +2329,31 @@ onBeforeUnmount(() => {
         @logout="logoutAccount"
       />
 
-      <ThreadList
-        v-if="railView === 'chats'"
-        ref="threadList"
-        v-model:filter-mode="filterMode"
-        :account="account"
-        :threads="threads"
-        :active-id="activeThreadId"
-        :query="threadQuery"
-        :loading="threadsLoading"
-        @select="selectThread"
-        @update:query="threadQuery = $event"
-        @refresh="loadThreads"
-        @new-chat="openNewChat"
-      />
+      <!-- KeepAlive 保活：聊天列表/通讯录切换不再销毁重建，头像与滚动位置得以保留。 -->
+      <KeepAlive>
+        <ThreadList
+          v-if="railView === 'chats'"
+          ref="threadList"
+          v-model:filter-mode="filterMode"
+          :account="account"
+          :threads="threads"
+          :active-id="activeThreadId"
+          :query="threadQuery"
+          :loading="threadsLoading"
+          @select="selectThread"
+          @update:query="threadQuery = $event"
+          @refresh="loadThreads"
+          @new-chat="openNewChat"
+        />
 
-      <ContactsPanel
-        v-else
-        ref="contactsPanel"
-        :account="account"
-        @select="startChatWithContact"
-        @start-id="startChatWithId"
-      />
+        <ContactsPanel
+          v-else
+          ref="contactsPanel"
+          :account="account"
+          @select="startChatWithContact"
+          @start-id="startChatWithId"
+        />
+      </KeepAlive>
 
       <main class="chat-pane">
         <header class="chat-header">
@@ -1882,8 +2390,9 @@ onBeforeUnmount(() => {
               <button
                 class="icon-button"
                 type="button"
-                title="搜索聊天"
-                @click="focusThreadSearch"
+                title="查找聊天记录"
+                :class="{ active: threadSearchOpen }"
+                @click="toggleThreadSearch"
               >
                 <Icon name="search" :size="16" />
               </button>
@@ -1921,6 +2430,51 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </header>
+
+        <section v-if="threadSearchOpen && activeThread" class="thread-search-panel">
+          <div class="thread-search-input">
+            <Icon name="search" :size="14" />
+            <input
+              ref="threadSearchInput"
+              v-model="threadSearchQuery"
+              type="text"
+              placeholder="查找当前会话的历史消息"
+              @keydown.esc.prevent="toggleThreadSearch"
+            >
+            <button
+              v-if="threadSearchQuery"
+              type="button"
+              class="thread-search-clear"
+              title="清空"
+              @click="threadSearchQuery = ''"
+            >
+              <Icon name="close" :size="12" />
+            </button>
+          </div>
+          <div v-if="threadSearching" class="thread-search-status">
+            <Icon name="refresh" :size="12" class="spin" />
+            搜索中…
+          </div>
+          <div
+            v-else-if="threadSearchResults.length === 0 && threadSearchQuery.trim()"
+            class="thread-search-status"
+          >
+            没有找到相关聊天记录
+          </div>
+          <div v-else-if="threadSearchResults.length > 0" class="thread-search-results scrollbar-thin">
+            <button
+              v-for="item in threadSearchResults"
+              :key="item.id"
+              type="button"
+              class="thread-search-item"
+              @click="jumpToSearchResult(item)"
+            >
+              <strong>{{ threadSearchSender(item) }}</strong>
+              <span class="thread-search-snippet">{{ threadSearchSnippet(item) }}</span>
+              <time>{{ formatListTime(item.createdAt) }}</time>
+            </button>
+          </div>
+        </section>
 
         <TransitionGroup name="incoming-toast" tag="div" class="incoming-toasts">
           <div
@@ -2091,8 +2645,10 @@ onBeforeUnmount(() => {
           :loading="messagesLoading"
           :older-loading="olderLoading"
           :has-more="Boolean(messagesCursor)"
+          :highlight-id="messageHighlightId"
           @load-older="loadOlderMessages"
           @at-bottom="handleMessageListBottom"
+          @reply="startReply"
         />
 
         <Transition name="jump">
@@ -2113,8 +2669,14 @@ onBeforeUnmount(() => {
           :attachments="stagedAttachments"
           :disabled="!activeThread || connectionState === 'offline'"
           :placeholder="activeThread ? `发消息给 ${threadName(activeThread)}` : '选择一个聊天'"
+          :reply-to="replyToDisplay"
+          :mention-available="activeThreadIsGroup"
+          :mention-options="mentionOptions"
+          :mention-loading="mentionLoading"
+          @mention-open="ensureGroupMembers(activeThreadId ?? '')"
           @attach-files="stageFiles"
           @remove-attachment="removeAttachment"
+          @cancel-reply="replyTo = null"
           @send="sendMessage"
         />
       </main>
@@ -2299,6 +2861,120 @@ onBeforeUnmount(() => {
 .icon-button.active {
   background: var(--panel-hover);
   color: var(--text);
+}
+
+/* 会话内历史搜索面板：展开在聊天头部之下。 */
+.thread-search-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  max-height: 260px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.thread-search-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.thread-search-input:focus-within {
+  border-color: var(--accent);
+}
+
+.thread-search-input input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.thread-search-clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.thread-search-clear:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.thread-search-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.thread-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin-top: 6px;
+  overflow-y: auto;
+}
+
+.thread-search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-search-item:hover {
+  background: var(--panel-hover);
+}
+
+.thread-search-item strong {
+  flex: 0 0 auto;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.thread-search-snippet {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.thread-search-item time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10.5px;
 }
 
 .chat-placeholder-icon {

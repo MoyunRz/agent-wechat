@@ -13,11 +13,13 @@ const props = defineProps<{
   loading: boolean
   olderLoading: boolean
   hasMore: boolean
+  highlightId?: string | null
 }>()
 
 const emit = defineEmits<{
   loadOlder: []
   'at-bottom': []
+  reply: [message: LocalMessage]
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
@@ -41,6 +43,15 @@ function scrollToBottom(force = false): void {
   if (!force && !stickToBottom.value)
     return
   el.scrollTop = el.scrollHeight
+}
+
+/** 将指定消息滚动到视口中央；消息未渲染（不在已加载区间）时不动作。 */
+function scrollToMessage(id: string): void {
+  const el = scroller.value
+  if (!el)
+    return
+  const target = el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(id)}"]`)
+  target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
 function maybeShowDay(index: number): boolean {
@@ -129,6 +140,7 @@ watch(
 
 defineExpose({
   scrollToBottom,
+  scrollToMessage,
   isAtBottom: () => stickToBottom.value,
 })
 </script>
@@ -173,6 +185,9 @@ defineExpose({
           :account="account"
           :media="mediaByMessage[message.id]"
           :group-position="groupPosition(index)"
+          :data-mid="message.id"
+          :class="{ 'message-flash': highlightId === message.id }"
+          @reply="emit('reply', message)"
         />
       </template>
     </div>
@@ -288,5 +303,16 @@ defineExpose({
 @keyframes pulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 0.95; }
+}
+
+/* 搜索定位高亮：落在 MessageBubble 根元素上（父作用域样式对子组件根元素生效）。 */
+.message-flash {
+  animation: message-flash 2.4s ease-out;
+}
+
+@keyframes message-flash {
+  0% { background: var(--accent-soft); }
+  70% { background: var(--accent-soft); }
+  100% { background: transparent; }
 }
 </style>

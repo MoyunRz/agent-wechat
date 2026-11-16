@@ -18,6 +18,7 @@ const props = defineProps<{
   bubbleInColor: string
   bubbleOutColor: string
   toastDurationMs: number
+  toastEnabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   'update:bubbleInColor': [value: string]
   'update:bubbleOutColor': [value: string]
   'update:toastDurationMs': [value: number]
+  'update:toastEnabled': [value: boolean]
   refreshAccount: []
   logout: []
 }>()
@@ -360,6 +362,21 @@ function onToastDurationInput(event: Event): void {
         </div>
 
         <div class="settings-section">
+          <label class="settings-row settings-toggle">
+            <span class="settings-label">新消息提示卡片</span>
+            <span
+              class="toggle-switch"
+              :class="{ on: toastEnabled }"
+              role="switch"
+              :aria-checked="toastEnabled"
+              @click="emit('update:toastEnabled', !toastEnabled)"
+            >
+              <span class="toggle-knob" />
+            </span>
+          </label>
+        </div>
+
+        <div v-if="toastEnabled" class="settings-section">
           <div class="settings-row">
             <span class="settings-label">新消息卡片消失时间</span>
             <span class="settings-value">{{ toastSeconds }} 秒</span>
@@ -710,6 +727,44 @@ function onToastDurationInput(event: Event): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.settings-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle-switch .toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-soft);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.toggle-switch.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.toggle-switch.on .toggle-knob {
+  transform: translateX(14px);
+  background: var(--accent);
 }
 
 .mode-switch {

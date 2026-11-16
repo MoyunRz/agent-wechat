@@ -3,6 +3,7 @@ import type {
   Contact,
   ContactLookupResponse,
   FriendRequestPreflight,
+  GroupMember,
   ListResponse,
   LoginAttempt,
   MediaJob,
@@ -15,6 +16,7 @@ import type {
   OwnedMediaSource,
   PendingFriendRequest,
   SendIntent,
+  TextMentions,
   Thread,
 } from './types'
 
@@ -105,6 +107,10 @@ const CODE_MESSAGES: Record<string, string> = {
   operation_in_progress: '操作正在进行中，请稍后重试。',
   media_expired: '媒体资源已过期。',
   unsupported: '当前媒体类型不受支持。',
+  mention_member_unavailable: '@ 的成员不在群成员列表中，请稍后重试。',
+  mention_all_forbidden: '只有群主或管理员可以 @ 所有人。',
+  invalid_mentions: '提及信息有误，请检查后重试。',
+  mentions_require_group: '只能在群聊中 @ 成员。',
 }
 
 const STATUS_MESSAGES: Record<number, string> = {
@@ -199,6 +205,18 @@ function enc(value: string): string {
   return encodeURIComponent(value)
 }
 
+// 头像 blob 内存缓存：key 为 `accountId|username|version`；头像字节很小（~10KB 级），
+// 上限 256 条足够覆盖整个通讯录，超出后按插入顺序淘汰最旧的一条。
+const AVATAR_CACHE_LIMIT = 256
+const avatarBlobCache = new Map<string, string>()
+const avatarBlobJobs = new Map<string, Promise<string | null>>()
+
+// 消息媒体 blob 内存缓存（图片/语音/缩略图）：key 为 contentUrl；上限 120 条。
+// 完整视频字节较大，不走此缓存（MessageBubble 对视频直接调 loadMedia）。
+const MEDIA_CACHE_LIMIT = 120
+const mediaBlobCache = new Map<string, string>()
+const mediaBlobJobs = new Map<string, Promise<string | null>>()
+
 export const wechatApi = {
   apiUrl,
 
@@ -250,22 +268,35 @@ export const wechatApi = {
     )
   },
 
-  qrUrl(accountId: string, attemptId: string, generation = 0, nonce = 0): string {
-    // 上游 wx 2.3.2 只接受 generation 查询参数；nonce 放在 fragment 里仅用于刷新图片，不发给服务端。
-    const params = new URLSearchParams({ generation: String(generation) })
-    const base = `${apiUrl(`/accounts/${enc(accountId)}/login-attempts/${enc(attemptId)}/qr`)}?${params.toString()}`
-    return nonce ? `${base}#v=${nonce}` : base
+  async loadLoginQr(accountId: string, attemptId: string, generation = 0): Promise<string> {
+    // 二维码以 <img> 展示，而 <img> 无法携带 Authorization 头；
+    // 改为带鉴权取回字节，再以 object URL 交给图片元素。
+    const response = await fetch(apiUrl(`/accounts/${enc(accountId)}/login-attempts/${enc(attemptId)}/qr?generation=${String(generation)}`), {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { ...authHeaders() },
+    })
+    if (!response.ok)
+      throw await readError(response)
+    return URL.createObjectURL(await response.blob())
   },
 
   async listThreads(accountId: string, limit = 50): Promise<ListResponse<Thread>> {
     return request<ListResponse<Thread>>(`/accounts/${enc(accountId)}/threads?limit=${limit}`)
   },
 
-  async listContacts(accountId: string, search = '', limit = 20): Promise<ListResponse<Contact>> {
-    const params = new URLSearchParams({ limit: String(limit) })
+  async listContacts(
+    accountId: string,
+    search = '',
+    limit = 20,
+    cursor?: string | null,
+  ): Promise<ListResponse<Contact>> {
+    const params = new URLSearchParams({ limit: String(Math.min(limit, 200)) })
     const keyword = search.trim()
     if (keyword)
       params.set('search', keyword)
+    if (cursor)
+      params.set('cursor', cursor)
     return request<ListResponse<Contact>>(`/accounts/${enc(accountId)}/contacts?${params.toString()}`)
   },
 
@@ -309,6 +340,15 @@ export const wechatApi = {
       'POST',
       {},
       { 'Idempotency-Key': idempotencyKey('contact-sync') },
+    )
+  },
+
+  syncGroups(accountId: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/group-sync`,
+      'POST',
+      {},
+      { 'Idempotency-Key': idempotencyKey('group-sync') },
     )
   },
 
@@ -369,11 +409,15 @@ export const wechatApi = {
     return response.items ?? []
   },
 
-  requestMediaTransfer(accountId: string, messageId: string): Promise<MediaTransfer> {
+  requestMediaTransfer(
+    accountId: string,
+    messageId: string,
+    quality: 'best' | 'thumbnail' | 'normal' = 'best',
+  ): Promise<MediaTransfer> {
     return jsonRequest<MediaTransfer>(
       `/accounts/${enc(accountId)}/messages/${enc(messageId)}/media-transfers`,
       'POST',
-      { messageId, assetId: null, quality: 'best' },
+      { messageId, assetId: null, quality },
       { 'Idempotency-Key': idempotencyKey('media-transfer') },
     )
   },
@@ -387,14 +431,62 @@ export const wechatApi = {
     )
   },
 
-  sendText(accountId: string, threadId: string, text: string): Promise<SendIntent> {
+  sendText(
+    accountId: string,
+    threadId: string,
+    text: string,
+    options: {
+      quote?: { messageId: string, serverId: string }
+      mentions?: TextMentions
+    } = {},
+  ): Promise<SendIntent> {
     // 上游 NativeTextSendRequest 是 deny_unknown_fields 的纯文本结构，
-    // 不能带 kind 字段；quoted/mention 通过 quote/mentions 扩展。
+    // 不能带 kind 字段；带引用时按上游契约补 kind: "text"。
+    const quote = options.quote
+    const mentions = options.mentions
+    const body: Record<string, unknown> = { threadId, text }
+    if (quote) {
+      body.kind = 'text'
+      body.quote = { messageId: quote.messageId, serverId: quote.serverId }
+    }
+    if (mentions)
+      body.mentions = mentions
     return jsonRequest<SendIntent>(
       `/accounts/${enc(accountId)}/sends`,
       'POST',
-      { threadId, text },
+      body,
       { 'Idempotency-Key': idempotencyKey('send') },
+    )
+  },
+
+  /** 群成员列表（本地 catalog 读，带游标翻页）；用于 @ 提及选择器。 */
+  async listGroupMembers(
+    accountId: string,
+    roomId: string,
+    limit = 200,
+    cursor?: string | null,
+  ): Promise<ListResponse<GroupMember>> {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (cursor)
+      params.set('cursor', cursor)
+    return request<ListResponse<GroupMember>>(
+      `/accounts/${enc(accountId)}/groups/${enc(roomId)}/members?${params}`,
+      { method: 'GET' },
+    )
+  },
+
+  /** 全账号消息检索（daemon 端已按关键词过滤）；客户端再按会话过滤。 */
+  async searchMessages(
+    accountId: string,
+    query: string,
+    limit = 200,
+    cursor?: string | null,
+  ): Promise<ListResponse<Message>> {
+    const params = new URLSearchParams({ limit: String(limit), search: query })
+    if (cursor)
+      params.set('cursor', cursor)
+    return request<ListResponse<Message>>(
+      `/accounts/${enc(accountId)}/messages?${params.toString()}`,
     )
   },
 
@@ -427,6 +519,115 @@ export const wechatApi = {
       return null
     const url = apiUrl(`/accounts/${enc(account)}/avatars/${enc(value)}`)
     return version ? `${url}?v=${version}` : url
+  },
+
+  /** 头像以 <img> 展示，而 <img> 无法携带 Authorization 头；带鉴权取回字节转为 object URL。 */
+  async loadAvatar(accountId: string, username: string, version = 0): Promise<string | null> {
+    const query = version ? `?v=${version}` : ''
+    const response = await fetch(apiUrl(`/accounts/${enc(accountId)}/avatars/${enc(username)}${query}`), {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { ...authHeaders() },
+    })
+    if (response.status === 404)
+      return null
+    if (!response.ok)
+      throw await readError(response)
+    return URL.createObjectURL(await response.blob())
+  },
+
+  /**
+   * 带内存缓存的头像加载：同一头像（账号+用户名+版本）在会话期间只取一次字节，
+   * 视图切换或列表重建时直接复用 object URL，避免反复请求与闪烁。
+   * 头像字节很小，缓存量上限内不做主动回收。
+   */
+  async loadAvatarCached(accountId: string, username: string, version = 0): Promise<string | null> {
+    const key = `${accountId}|${username}|${version}`
+    const cached = avatarBlobCache.get(key)
+    if (cached)
+      return cached
+    const inFlight = avatarBlobJobs.get(key)
+    if (inFlight)
+      return inFlight
+    const job = wechatApi.loadAvatar(accountId, username, version)
+      .then((url) => {
+        avatarBlobJobs.delete(key)
+        if (url) {
+          if (avatarBlobCache.size >= AVATAR_CACHE_LIMIT) {
+            const oldest = avatarBlobCache.keys().next().value
+            if (oldest !== undefined)
+              avatarBlobCache.delete(oldest)
+          }
+          avatarBlobCache.set(key, url)
+        }
+        return url
+      })
+      .catch((error) => {
+        avatarBlobJobs.delete(key)
+        throw error
+      })
+    avatarBlobJobs.set(key, job)
+    return job
+  },
+
+  /**
+   * 消息媒体（图片/语音/视频）以 <img>/<audio>/<video> 展示，无法携带 Authorization 头；
+   * 带鉴权取回字节转 object URL。外部 CDN 直链原样返回。
+   */
+  async loadMedia(contentUrl: string | null | undefined): Promise<string | null> {
+    const value = contentUrl?.trim()
+    if (!value)
+      return null
+    if (value.startsWith('http://') || value.startsWith('https://'))
+      return value
+    const url = wechatApi.mediaUrl(value)
+    if (!url)
+      return null
+    const response = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { ...authHeaders() },
+    })
+    if (!response.ok)
+      throw await readError(response)
+    return URL.createObjectURL(await response.blob())
+  },
+
+  /**
+   * 带内存缓存的媒体加载：同一条媒体在会话期间只取一次字节，
+   * 切换会话/视图回来时直接复用 object URL，不再重新下载与闪烁。
+   * 超过 4MB 的字节（大图/视频）不入缓存，避免占用过多内存；LRU 上限 120 条。
+   */
+  async loadMediaCached(contentUrl: string | null | undefined): Promise<string | null> {
+    const key = contentUrl?.trim()
+    if (!key)
+      return null
+    const cached = mediaBlobCache.get(key)
+    if (cached)
+      return cached
+    const inFlight = mediaBlobJobs.get(key)
+    if (inFlight)
+      return inFlight
+    const job = wechatApi.loadMedia(key)
+      .then((url) => {
+        mediaBlobJobs.delete(key)
+        if (url && url.startsWith('blob:')) {
+          // 大字节不缓存：blob 尺寸无法直接得知，放弃缓存只影响二次显示速度。
+          if (mediaBlobCache.size >= MEDIA_CACHE_LIMIT) {
+            const oldest = mediaBlobCache.keys().next().value
+            if (oldest !== undefined)
+              mediaBlobCache.delete(oldest)
+          }
+          mediaBlobCache.set(key, url)
+        }
+        return url
+      })
+      .catch((error) => {
+        mediaBlobJobs.delete(key)
+        throw error
+      })
+    mediaBlobJobs.set(key, job)
+    return job
   },
 
   mediaUrl(contentUrl: string | null | undefined): string | null {

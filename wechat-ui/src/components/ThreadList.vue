@@ -24,12 +24,33 @@ const emit = defineEmits<{
 
 const searchInput = ref<HTMLInputElement | null>(null)
 
+const FILTER_TABS: ReadonlyArray<{ mode: ThreadFilter, label: string }> = [
+  { mode: 'all', label: '全部' },
+  { mode: 'unread', label: '未读' },
+  { mode: 'direct', label: '单聊' },
+  { mode: 'groups', label: '群聊' },
+  { mode: 'mini', label: '小程序' },
+  { mode: 'official', label: '服务号' },
+]
+
+/** 按会话类型分桶：群聊 / 小程序（OpenIM 客服）/ 服务号（gh_ 公众号）/ 其余为单聊。 */
+function threadBucket(thread: Thread): 'direct' | 'groups' | 'mini' | 'official' {
+  if (thread.kind === 'group')
+    return 'groups'
+  const peer = (thread.peerId || thread.id).trim()
+  if (peer.endsWith('@openim'))
+    return 'mini'
+  if (peer.startsWith('gh_'))
+    return 'official'
+  return 'direct'
+}
+
 const filtered = computed(() => {
   let items = props.threads
-  if (props.filterMode === 'groups')
-    items = items.filter(thread => thread.kind === 'group')
-  else if (props.filterMode === 'unread')
+  if (props.filterMode === 'unread')
     items = items.filter(thread => (thread.unreadCount ?? 0) > 0)
+  else if (props.filterMode !== 'all')
+    items = items.filter(thread => threadBucket(thread) === props.filterMode)
 
   const keyword = props.query.trim().toLowerCase()
   if (!keyword)
@@ -101,28 +122,14 @@ defineExpose({ focusSearch })
 
     <div class="filter-tabs">
       <button
+        v-for="tab in FILTER_TABS"
+        :key="tab.mode"
         type="button"
         class="filter-tab"
-        :class="{ active: filterMode === 'all' }"
-        @click="emit('update:filterMode', 'all')"
+        :class="{ active: filterMode === tab.mode }"
+        @click="emit('update:filterMode', tab.mode)"
       >
-        全部
-      </button>
-      <button
-        type="button"
-        class="filter-tab"
-        :class="{ active: filterMode === 'unread' }"
-        @click="emit('update:filterMode', 'unread')"
-      >
-        未读
-      </button>
-      <button
-        type="button"
-        class="filter-tab"
-        :class="{ active: filterMode === 'groups' }"
-        @click="emit('update:filterMode', 'groups')"
-      >
-        群聊
+        {{ tab.label }}
       </button>
     </div>
 
@@ -181,6 +188,9 @@ defineExpose({ focusSearch })
         <p v-if="query">没有匹配的聊天</p>
         <p v-else-if="filterMode === 'unread'">没有未读消息</p>
         <p v-else-if="filterMode === 'groups'">还没有群聊</p>
+        <p v-else-if="filterMode === 'direct'">还没有单聊</p>
+        <p v-else-if="filterMode === 'mini'">还没有小程序会话</p>
+        <p v-else-if="filterMode === 'official'">还没有服务号消息</p>
         <template v-else>
           <p>还没有聊天</p>
           <span>新账号不会同步手机历史，收到新消息后会出现在这里。</span>
@@ -306,18 +316,26 @@ defineExpose({ focusSearch })
 .filter-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 0 12px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .filter-tab {
-  padding: 4px 11px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-size: 11.5px;
   font-weight: 500;
+  white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
