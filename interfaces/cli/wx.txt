@@ -475,6 +475,7 @@ wx profiles select | - | Save the default local profile for this CLI or selected
 wx profiles select <NAME> | position 1, required | Profile name from wx profiles list
 wx profiles use | hidden alias | Alias of wx profiles select
 wx serve | - | Run the daemon in the foreground. Use the supplied service unit for background ownership
+wx serve --exit-with-parent | switch | Stop gracefully when the process that started this daemon exits, for an app that owns it
 wx status | - | Show the selected server's health and identity
 wx store | - | Offline operations require exclusive ownership; stop the daemon and official client first
 wx store attach | - | Attach a supported stopped official profile in place

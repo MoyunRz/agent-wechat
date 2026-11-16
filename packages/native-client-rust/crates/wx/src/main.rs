@@ -98,7 +98,11 @@ enum Command {
         command: ConfigCommand,
     },
     /// Run the daemon in the foreground. Use the supplied service unit for background ownership.
-    Serve {},
+    Serve {
+        /// Stop gracefully when the process that started this daemon exits, for an app that owns it.
+        #[arg(long)]
+        exit_with_parent: bool,
+    },
     /// Start, inspect or stop the local background daemon.
     Daemon {
         #[command(subcommand)]
@@ -1182,20 +1186,30 @@ async fn main() {
     }
     std::process::exit(outcome::exit());
 }
-async fn shutdown(core: Arc<Core>) {
+async fn shutdown(core: Arc<Core>, parent: Option<wechat_platform::ParentWatch>) {
     async fn requested(core: &Core) {
         while !core.stopping.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    // A parent that exits during startup is noticed once the daemon is ready,
+    // because the watch keeps reporting the exit.
+    async fn orphaned(parent: Option<wechat_platform::ParentWatch>) {
+        let Some(parent) = parent else {
+            return std::future::pending().await;
+        };
+        while !parent.exited() {
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
     #[cfg(unix)]
     {
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("signal registration");
-        tokio::select! { _=tokio::signal::ctrl_c()=>{}, _=term.recv()=>{}, _=requested(&core)=>{} }
+        tokio::select! { _=tokio::signal::ctrl_c()=>{}, _=term.recv()=>{}, _=requested(&core)=>{}, _=orphaned(parent)=>{} }
     }
     #[cfg(windows)]
-    tokio::select! { _=tokio::signal::ctrl_c()=>{}, _=requested(&core)=>{} }
+    tokio::select! { _=tokio::signal::ctrl_c()=>{}, _=requested(&core)=>{}, _=orphaned(parent)=>{} }
     core.shutdown_gracefully().await;
 }
 
@@ -1393,6 +1407,13 @@ fn query(path: String, values: &[(&str, Option<String>)]) -> String {
     )
 }
 async fn run(cli: Cli) -> Result<()> {
+    // Record the parent first, while the process that started serve is still running.
+    let parent = match &cli.command {
+        Command::Serve {
+            exit_with_parent: true,
+        } => Some(wechat_platform::ParentWatch::new().context("cannot watch the parent process")?),
+        _ => None,
+    };
     let output = Output::new(cli.json);
     if matches!(
         &cli.command,
@@ -1474,7 +1495,7 @@ async fn run(cli: Cli) -> Result<()> {
             &cwd,
         )?;
         return match cli.command {
-            Command::Serve {} => serve(config, cli.token_stdin, cli.json).await,
+            Command::Serve { .. } => serve(config, cli.token_stdin, cli.json, parent).await,
             Command::Daemon { command } => daemon::run(config, command, output).await,
             Command::Store { command } => {
                 offline(config, cli.account.unwrap_or_default(), command, output)
@@ -2327,7 +2348,12 @@ fn resolve_ui_dir(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
         .find(|dir| dir.join("index.html").is_file())
 }
 
-async fn serve(config: wechat_config::ServerConfig, token_stdin: bool, json: bool) -> Result<()> {
+async fn serve(
+    config: wechat_config::ServerConfig,
+    token_stdin: bool,
+    json: bool,
+    parent: Option<wechat_platform::ParentWatch>,
+) -> Result<()> {
     let supplied = if token_stdin {
         if config.token_explicit {
             bail!("--token-stdin cannot be combined with a configured tokenFile");
@@ -2387,7 +2413,7 @@ async fn serve(config: wechat_config::ServerConfig, token_stdin: bool, json: boo
         None => eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id),
     }
     let local =
-        axum::serve(listener, router.clone()).with_graceful_shutdown(shutdown(core.clone()));
+        axum::serve(listener, router.clone()).with_graceful_shutdown(shutdown(core.clone(), parent));
     if let Some((socket, tls)) = network {
         let handle = axum_server::Handle::new();
         let stop_handle = handle.clone();
