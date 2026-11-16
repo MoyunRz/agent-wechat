@@ -1,0 +1,246 @@
+//! Accept one inbound contact request through the supported contact operation.
+//!
+//! The verifyuser endpoint multiplexes contact-request actions by opcode.
+//! Request field2 carries the opcode, field3 the request scene, and repeated
+//! field9 entries carry one encryptusername/ticket pair each; both subfields
+//! are required strings. The response's BaseResponse retains the signed
+//! service code and message. Opcode and scene semantics follow the request
+//! that carried the pair and are confirmed during staged rollout.
+use crate::{protobuf as p, AccountState, NativeClient};
+use anyhow::{ensure, Result};
+use serde::{Deserialize, Serialize};
+
+const CGI: u16 = 137;
+const PATH: &str = "/cgi-bin/micromsg-bin/verifyuser";
+const MAX_IDENTITY_BYTES: usize = 512;
+const MAX_TICKET_BYTES: usize = 16384;
+
+/// Opcode accepting the contact request carried in field9.
+pub const ACCEPT_OPCODE: u32 = 3;
+
+/// One contact request to act on, exactly as received with that request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerifyUserAcceptRequest {
+    /// Encryptusername supplied with the inbound contact request.
+    pub encrypt_username: String,
+    /// Ticket supplied with the inbound contact request.
+    pub ticket: String,
+    /// Scene value supplied with the inbound contact request.
+    pub scene: u32,
+}
+
+/// The reply for one contact-request action, retaining the signed code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyUserAcceptReply {
+    /// Signed service code; zero means accepted.
+    pub service_code: i32,
+    /// Service-supplied message, when present.
+    pub message: Option<String>,
+}
+
+impl VerifyUserAcceptReply {
+    /// Whether the service accepted the action.
+    pub fn accepted(&self) -> bool {
+        self.service_code == 0
+    }
+}
+
+fn supplied_text(value: &str, max: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max
+        && !value.contains('\0')
+        && !value.chars().any(char::is_control)
+}
+
+/// Encode one contact-request acceptance with the account's BaseRequest.
+pub fn request(state: &AccountState, input: &VerifyUserAcceptRequest) -> Result<Vec<u8>> {
+    state.validate()?;
+    ensure!(
+        input.encrypt_username.len() <= MAX_IDENTITY_BYTES
+            && supplied_text(&input.encrypt_username, MAX_IDENTITY_BYTES),
+        "Invalid contact-request encryptusername"
+    );
+    ensure!(
+        supplied_text(&input.ticket, MAX_TICKET_BYTES),
+        "Invalid contact-request ticket"
+    );
+    let entry = p::message(&[
+        p::bytes(1, input.encrypt_username.as_bytes()),
+        p::bytes(2, input.ticket.as_bytes()),
+    ])?;
+    p::message(&[
+        p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?),
+        p::uint(2, u64::from(ACCEPT_OPCODE)),
+        p::uint(3, u64::from(input.scene)),
+        p::bytes(9, &entry),
+    ])
+}
+
+fn optional_text(fields: &[p::Field], number: u32, max: usize) -> Result<Option<String>> {
+    p::optional_data(fields, number)?
+        .map(|bytes| {
+            ensure!(bytes.len() <= max, "verifyuser field exceeds limit");
+            let text = std::str::from_utf8(bytes)?;
+            ensure!(!text.contains('\0'), "Invalid verifyuser text");
+            Ok(text.to_owned())
+        })
+        .transpose()
+}
+
+/// Decode an authenticated verifyuser reply, preserving signed rejections.
+pub fn decode_response(bytes: &[u8]) -> Result<VerifyUserAcceptReply> {
+    let fields = p::decode(bytes)?;
+    let base = p::decode(p::data(&fields, 1)?)?;
+    let raw = p::scalar(&base, 1)?;
+    let code = raw as u32 as i32;
+    ensure!(
+        raw <= u64::from(u32::MAX) || (code < 0 && raw == code as i64 as u64),
+        "Invalid verifyuser service code"
+    );
+    let message = optional_text(&base, 2, MAX_IDENTITY_BYTES)?;
+    Ok(VerifyUserAcceptReply {
+        service_code: code,
+        message,
+    })
+}
+
+impl NativeClient {
+    /// Submit exactly one contact-request acceptance without renewal, retry or
+    /// login fallback. An error can follow submission and must be treated as an
+    /// unknown outcome.
+    pub(crate) fn verify_user_accept_snapshot(
+        &self,
+        state: &mut AccountState,
+        input: &VerifyUserAcceptRequest,
+    ) -> Result<VerifyUserAcceptReply> {
+        let request = zeroize::Zeroizing::new(request(state, input)?);
+        let reply = self.authenticated_rpc(state, CGI, PATH, &request)?;
+        decode_response(&reply)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> AccountState {
+        AccountState {
+            schema: 1,
+            device: crate::DeviceProfile {
+                device_id: b"0123456789abcdef".to_vec(),
+                device_type: "UnifiedPCLinux x86_64".into(),
+                client_version: -227271398,
+            },
+            uin: 42,
+            own_username: "synthetic_user".into(),
+            cookie: vec![],
+            session_key: vec![1; 16],
+            request_key: vec![2; 24],
+            response_key: vec![3; 24],
+            auto_auth_key: vec![4; 16],
+            key_info: vec![],
+            database_password: vec![],
+            auth_snapshot: Default::default(),
+            long_host: "long.weixin.qq.com".into(),
+            short_host: "short.weixin.qq.com".into(),
+        }
+    }
+
+    fn input() -> VerifyUserAcceptRequest {
+        VerifyUserAcceptRequest {
+            encrypt_username: "V2_example".into(),
+            ticket: "ticket".into(),
+            scene: 14,
+        }
+    }
+
+    #[test]
+    fn request_matches_the_accept_wire_layout() {
+        // Field 1 = BaseRequest, field 2 = opcode 3, field 3 = scene, field 9
+        // = one encryptusername/ticket pair.
+        let encoded = request(&state(), &input()).unwrap();
+        let fields = p::decode(&encoded).unwrap();
+        assert_eq!(fields.len(), 4);
+        let base = p::decode(p::data(&fields, 1).unwrap()).unwrap();
+        assert_eq!(p::scalar(&base, 2).unwrap(), 42);
+        assert_eq!(p::scalar(&fields, 2).unwrap(), 3);
+        assert_eq!(p::scalar(&fields, 3).unwrap(), 14);
+        let entry = p::decode(p::data(&fields, 9).unwrap()).unwrap();
+        assert_eq!(p::data(&entry, 1).unwrap(), b"V2_example");
+        assert_eq!(p::data(&entry, 2).unwrap(), b"ticket");
+    }
+
+    #[test]
+    fn request_rejects_invalid_identities_tickets_and_oversized_values() {
+        let mut empty_identity = input();
+        empty_identity.encrypt_username = String::new();
+        assert!(request(&state(), &empty_identity).is_err());
+        for value in ["", "a\0b", "a\nb", &"x".repeat(MAX_IDENTITY_BYTES + 1)] {
+            let mut bad = input();
+            bad.encrypt_username = value.into();
+            assert!(request(&state(), &bad).is_err());
+        }
+        for value in ["", "a\0b", &"x".repeat(MAX_TICKET_BYTES + 1)] {
+            let mut bad = input();
+            bad.ticket = value.into();
+            assert!(request(&state(), &bad).is_err());
+        }
+        let mut invalid = state();
+        invalid.uin = 0;
+        assert!(request(&invalid, &input()).is_err());
+    }
+
+    #[test]
+    fn response_reads_service_code_and_message() {
+        let bytes = p::message(&[p::bytes(
+            1,
+            &p::message(&[p::int32(1, 0), p::bytes(2, b"ok")]).unwrap(),
+        )])
+        .unwrap();
+        let reply = decode_response(&bytes).unwrap();
+        assert_eq!(reply.service_code, 0);
+        assert_eq!(reply.message.as_deref(), Some("ok"));
+        let minimal = decode_response(
+            &p::message(&[p::bytes(1, &p::message(&[p::int32(1, 0)]).unwrap())]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(minimal.service_code, 0);
+        assert!(minimal.message.is_none());
+    }
+
+    #[test]
+    fn response_preserves_signed_service_rejections() {
+        for (code, expected) in [
+            (-1, -1),
+            (-13, -13),
+            (i32::MIN, i32::MIN),
+            (1, 1),
+            (i32::MAX, i32::MAX),
+        ] {
+            let bytes =
+                p::message(&[p::bytes(1, &p::message(&[p::int32(1, code)]).unwrap())]).unwrap();
+            let reply = decode_response(&bytes).unwrap();
+            assert_eq!(reply.service_code, expected);
+            assert_eq!(reply.accepted(), code == 0);
+        }
+    }
+
+    #[test]
+    fn response_rejects_missing_ambiguous_or_malformed_base() {
+        for bytes in [
+            Vec::new(),
+            p::uint(1, 0),
+            p::bytes(2, &p::message(&[p::int32(1, 0)]).unwrap()),
+            p::message(&[
+                p::bytes(1, &p::message(&[p::int32(1, 0)]).unwrap()),
+                p::bytes(1, &p::message(&[p::int32(1, 0)]).unwrap()),
+            ])
+            .unwrap(),
+            p::bytes(1, &[]),
+            p::message(&[p::bytes(1, &p::uint(1, 1u64 << 32))]).unwrap(),
+            p::message(&[p::bytes(1, &p::message(&[p::bytes(2, &[0xff])]).unwrap())]).unwrap(),
+        ] {
+            assert!(decode_response(&bytes).is_err());
+        }
+    }
+}

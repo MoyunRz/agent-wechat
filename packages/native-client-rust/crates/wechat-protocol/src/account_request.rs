@@ -78,6 +78,7 @@ impl AccountRequest<'_> {
     operation!(group_detail_raw(group: &str) -> Vec<u8> => group_detail_raw_snapshot);
     operation!(group_mutation_raw(request: &crate::GroupRpc) -> Vec<u8> => group_mutation_raw_snapshot);
     operation!(recall_message(request: &crate::MessageRecall) -> crate::MessageRecallReply => recall_message_snapshot);
+    operation!(verify_user_accept(request: &crate::VerifyUserAcceptRequest) -> crate::VerifyUserAcceptReply => verify_user_accept_snapshot);
     operation!(notify_read_session(request: &crate::SessionReadNotification) -> crate::SessionReadReply => notify_read_session_snapshot);
     operation!(contact_sync(cursor: &[u8], message_cursor: &[u8], continuation: bool) -> crate::contact_sync::ContactSyncBatch => contact_sync_snapshot);
     operation!(send_share(destination: &str, client_id: &str, created_at: u32, content: &str) -> crate::media_send::MediaSendResult => send_share_snapshot);

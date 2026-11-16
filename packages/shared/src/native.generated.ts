@@ -1507,6 +1507,25 @@ export type NativeRecallRequest = {
  * message in the URL.
  */
 serverId: string, };
+export type NativeContactAcceptRequest = { 
+/**
+ * The request's `encryptusername`, copied exactly as the account received it.
+ */
+encryptUsername: string, 
+/**
+ * The request's ticket, copied exactly as the account received it.
+ */
+ticket: string, 
+/**
+ * The request's scene value, copied exactly as the account received it.
+ */
+scene: number, };
+export type NativeContactGateRequest = { 
+/**
+ * True to allow contact-request acceptances; false to block them. The gate
+ * starts closed for every account.
+ */
+enabled: boolean, };
 export type NativeReadRequest = { 
 /**
  * The chat's `readStateVersion` from when you read it. The request is refused if the chat has

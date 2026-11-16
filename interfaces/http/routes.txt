@@ -44,6 +44,12 @@ request MediaTransferRequest.messageId | string, required | ID of the message to
 request MediaTransferRequest.quality | string, values best|thumbnail|standard|original|normal|encoded, default best | Which copy to download. The default is `best`.
 request NativeAccountRemovalRequest | object, rejects unknown fields | Request to remove a signed-out account.
 request NativeAccountRemovalRequest.confirmAccountId | string, required | Must repeat the account ID from the URL, to confirm the removal.
+request NativeContactAcceptRequest | object, rejects unknown fields | Request to accept one inbound contact request.
+request NativeContactAcceptRequest.encryptUsername | string, required | The request's `encryptusername`, copied exactly as the account received it.
+request NativeContactAcceptRequest.scene | integer, required, min 0, format uint32 | The request's scene value, copied exactly as the account received it.
+request NativeContactAcceptRequest.ticket | string, required | The request's ticket, copied exactly as the account received it.
+request NativeContactGateRequest | object, rejects unknown fields | Request to open or close the per-account contact-request acceptance gate.
+request NativeContactGateRequest.enabled | boolean, required | True to allow contact-request acceptances; false to block them. The gate starts closed for every account.
 request NativeForgetRequest | object, rejects unknown fields | Request to delete the account's saved login credentials.
 request NativeForgetRequest.confirm | boolean, required | Must be true. It confirms that the credentials should be deleted.
 request NativeGroupCreateRequest | object, rejects unknown fields | Request to create a group chat.
@@ -772,6 +778,8 @@ route POST /v1/accounts/{a}/connect | scope login, response untyped, status 202,
 route POST /v1/accounts/{a}/consumers/{consumer}/ack | scope read, request EventAckRequest, response untyped | Record how far a named consumer has read the event stream. It never marks messages read.
 route POST /v1/accounts/{a}/contact-sync | scope read, response untyped, status 202, sdk response NativeOperation | Start syncing the contact catalog from WeChat. Poll the returned operation.
 route POST /v1/accounts/{a}/contacts/lookup | scope read, request ContactLookupRequest, response untyped | Look up the saved details of several contacts by ID.
+route POST /v1/accounts/{a}/contacts/verify-user/accept | scope send, idempotency key required, request NativeContactAcceptRequest, response NativeOperation, status 202, sdk response NativeOperation | Accept one inbound contact request by the encryptusername, ticket and scene it carried. The account's gate must be open. Poll the returned operation.
+route POST /v1/accounts/{a}/contacts/verify-user/gate | scope send, request NativeContactGateRequest, response untyped | Open or close the account's contact-request acceptance gate. The gate starts closed.
 route POST /v1/accounts/{a}/contacts/{id}/refresh | scope read, response untyped, status 202, sdk response NativeOperation | Ask WeChat for the latest details of one contact. Poll the returned operation.
 route POST /v1/accounts/{a}/disconnect | scope login, response untyped | Close the connection to WeChat but keep the saved login trust.
 route POST /v1/accounts/{a}/forget-credentials | scope login, idempotency key required, request NativeForgetRequest, response untyped, status 202, sdk response NativeOperation | Delete the saved login credentials of the account. The body must confirm.

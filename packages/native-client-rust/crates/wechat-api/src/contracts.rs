@@ -615,6 +615,25 @@ pub struct NativeRecallRequest {
     /// message in the URL.
     pub server_id: String,
 }
+/// Request to accept one inbound contact request.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactAcceptRequest {
+    /// The request's `encryptusername`, copied exactly as the account received it.
+    pub encrypt_username: String,
+    /// The request's ticket, copied exactly as the account received it.
+    pub ticket: String,
+    /// The request's scene value, copied exactly as the account received it.
+    pub scene: u32,
+}
+/// Request to open or close the per-account contact-request acceptance gate.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactGateRequest {
+    /// True to allow contact-request acceptances; false to block them. The gate
+    /// starts closed for every account.
+    pub enabled: bool,
+}
 /// Request to mark a chat as read.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -756,6 +775,8 @@ pub fn typescript() -> String {
         NativeTextSendRequest::decl(),
         wechat_core::ShareSendRequest::decl(),
         NativeRecallRequest::decl(),
+        NativeContactAcceptRequest::decl(),
+        NativeContactGateRequest::decl(),
         NativeReadRequest::decl(),
         NativeForgetRequest::decl(),
         NativeMediaWritebackRequest::decl(),

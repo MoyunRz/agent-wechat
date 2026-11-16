@@ -82,6 +82,8 @@ payloads! {
     "NativeThreadNotificationsRequest" => crate::contracts::NativeThreadNotificationsRequest,
     "NativeThreadPinRequest" => crate::contracts::NativeThreadPinRequest,
     "NativeRecallRequest" => crate::contracts::NativeRecallRequest,
+    "NativeContactAcceptRequest" => crate::contracts::NativeContactAcceptRequest,
+    "NativeContactGateRequest" => crate::contracts::NativeContactGateRequest,
     "NativeForgetRequest" => crate::contracts::NativeForgetRequest,
     "NativeTextSendRequest" => crate::contracts::NativeTextSendRequest,
     "NativeSendIntent" => crate::contracts::NativeSendIntent,

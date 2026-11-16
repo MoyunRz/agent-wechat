@@ -1600,6 +1600,46 @@
         ],
         "type": "object"
       },
+      "NativeContactAcceptRequest": {
+        "additionalProperties": false,
+        "description": "Request to accept one inbound contact request.",
+        "properties": {
+          "encryptUsername": {
+            "description": "The request's `encryptusername`, copied exactly as the account received it.",
+            "type": "string"
+          },
+          "scene": {
+            "description": "The request's scene value, copied exactly as the account received it.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ticket": {
+            "description": "The request's ticket, copied exactly as the account received it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encryptUsername",
+          "scene",
+          "ticket"
+        ],
+        "type": "object"
+      },
+      "NativeContactGateRequest": {
+        "additionalProperties": false,
+        "description": "Request to open or close the per-account contact-request acceptance gate.",
+        "properties": {
+          "enabled": {
+            "description": "True to allow contact-request acceptances; false to block them. The gate\nstarts closed for every account.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "NativeEvent": {
         "description": "An entry in the account's event log, which keeps only about the most recent 10,000 events.",
         "properties": {
@@ -4835,6 +4875,131 @@
           }
         ],
         "summary": "Look up the saved details of several contacts by ID.",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/contacts/verify-user/accept": {
+      "post": {
+        "operationId": "acceptContactRequest",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeating a request with the same key returns the original result instead of repeating the work.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeContactAcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeOperation"
+                }
+              }
+            },
+            "description": "Accepted. The work continues in the background."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "send"
+            ]
+          }
+        ],
+        "summary": "Accept one inbound contact request by the encryptusername, ticket and scene it carried. The account's gate must be open. Poll the returned operation.",
+        "tags": [
+          "contacts"
+        ],
+        "x-agent-wechat-sdk-response": [
+          {
+            "$ref": "#/components/schemas/NativeOperation"
+          }
+        ]
+      }
+    },
+    "/v1/accounts/{a}/contacts/verify-user/gate": {
+      "post": {
+        "operationId": "setContactRequestGate",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeContactGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "send"
+            ]
+          }
+        ],
+        "summary": "Open or close the account's contact-request acceptance gate. The gate starts closed.",
         "tags": [
           "contacts"
         ]

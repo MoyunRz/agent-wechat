@@ -33,6 +33,14 @@ pub(super) fn routes() -> Router<App> {
             "/v1/accounts/{a}/contacts/{id}/refresh",
             post(refresh_contact),
         )
+        .api_route(
+            "/v1/accounts/{a}/contacts/verify-user/accept",
+            post(accept_contact),
+        )
+        .api_route(
+            "/v1/accounts/{a}/contacts/verify-user/gate",
+            post(contact_gate),
+        )
         .api_route("/v1/accounts/{a}/groups/{id}/refresh", post(refresh_group))
         .api_route(
             "/v1/accounts/{a}/groups/{id}/members/refresh",
@@ -84,6 +92,37 @@ async fn account_settings(
 ) -> ApiResult<Json<wechat_store::AccountSettings>> {
     c.require(Some(&a), "read")?;
     Ok(Json(app.core.store.account_settings(&a)?))
+}
+async fn accept_contact(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<contracts::NativeContactAcceptRequest>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    c.require(Some(&a), "send")?;
+    let key = idempotency_key(&headers)?;
+    let operation = app
+        .core
+        .accept_contact_request(&a, &input.encrypt_username, &input.ticket, input.scene, key)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        checked::<contracts::NativeOperation>(
+            serde_json::to_value(operation).map_err(anyhow::Error::from)?,
+        )?,
+    ))
+}
+async fn contact_gate(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<contracts::NativeContactGateRequest>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "send")?;
+    let _guard = app.core.lock_account(&a).await?;
+    app.core.set_contact_request_gate(&a, input.enabled)?;
+    Ok(Json(json!({"enabled": input.enabled})))
 }
 async fn update_settings(
     State(app): State<App>,
