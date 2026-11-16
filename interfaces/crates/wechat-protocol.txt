@@ -1,4 +1,4 @@
-# Public API of the wechat-protocol crate (default features, x86_64-unknown-linux-gnu). Generated from rustdoc JSON; do not edit.
+# Public API of the wechat-protocol crate (default features, aarch64-apple-darwin). Generated from rustdoc JSON; do not edit.
 # Run `pnpm interfaces` after changing the crate. Format: ITEM | SIGNATURE | DOC SUMMARY
 const wechat_protocol::MAX_MESSAGE_BYTES | usize | MISSING DOC
 const wechat_protocol::ServiceRejected::SESSION_REJECTED | i32 | Code the session boundaries return when they no longer accept the account's credentials.
@@ -24,6 +24,7 @@ const wechat_protocol::silk::MAX_NOTE_MS | u32 | Longest single voice note: the 
 const wechat_protocol::silk::MAX_SAMPLES | usize | MISSING DOC
 const wechat_protocol::silk::MAX_STREAM_BYTES | usize | Largest stream accepted by framing validation and decoding.
 const wechat_protocol::silk::SAMPLE_RATE | u32 | MISSING DOC
+const wechat_protocol::verify_user::ACCEPT_OPCODE | u32 | Opcode accepting the contact request carried in field9.
 enum wechat_protocol::AccountInterrupted | #[non_exhaustive] enum | Why the account owner ended a request or a notification wait. This says nothing about whether bytes were sent; check [`NativeRequestNotSubmitted`](crate::NativeRequestNotSubmitted) for that.
 enum wechat_protocol::AccountLifecycle | enum | MISSING DOC
 enum wechat_protocol::GroupMutation | enum | MISSING DOC
@@ -228,6 +229,11 @@ field wechat_protocol::TextSendResult::outer_code | i32 | MISSING DOC
 field wechat_protocol::TextSendResult::returned_client_id_matches | bool | MISSING DOC
 field wechat_protocol::TextSendResult::returned_destination_matches | bool | MISSING DOC
 field wechat_protocol::TextSendResult::server_message_id | core::option::Option<alloc::string::String> | MISSING DOC
+field wechat_protocol::VerifyUserAcceptReply::message | core::option::Option<alloc::string::String> | Service-supplied message, when present.
+field wechat_protocol::VerifyUserAcceptReply::service_code | i32 | Signed service code; zero means accepted.
+field wechat_protocol::VerifyUserAcceptRequest::encrypt_username | alloc::string::String | Encryptusername supplied with the inbound contact request.
+field wechat_protocol::VerifyUserAcceptRequest::scene | u32 | Scene value supplied with the inbound contact request.
+field wechat_protocol::VerifyUserAcceptRequest::ticket | alloc::string::String | Ticket supplied with the inbound contact request.
 field wechat_protocol::VoiceChunk::bytes | alloc::vec::Vec<u8> | MISSING DOC
 field wechat_protocol::VoiceChunk::complete | bool | MISSING DOC
 field wechat_protocol::VoiceChunk::echoed_server_id | core::option::Option<alloc::string::String> | MISSING DOC
@@ -561,6 +567,11 @@ field wechat_protocol::quote_send::QuoteReference::from_user | alloc::string::St
 field wechat_protocol::quote_send::QuoteReference::message_type | i32 | MISSING DOC
 field wechat_protocol::quote_send::QuoteReference::msg_source | core::option::Option<alloc::string::String> | MISSING DOC
 field wechat_protocol::quote_send::QuoteReference::server_id | alloc::string::String | MISSING DOC
+field wechat_protocol::verify_user::VerifyUserAcceptReply::message | core::option::Option<alloc::string::String> | Service-supplied message, when present.
+field wechat_protocol::verify_user::VerifyUserAcceptReply::service_code | i32 | Signed service code; zero means accepted.
+field wechat_protocol::verify_user::VerifyUserAcceptRequest::encrypt_username | alloc::string::String | Encryptusername supplied with the inbound contact request.
+field wechat_protocol::verify_user::VerifyUserAcceptRequest::scene | u32 | Scene value supplied with the inbound contact request.
+field wechat_protocol::verify_user::VerifyUserAcceptRequest::ticket | alloc::string::String | Ticket supplied with the inbound contact request.
 field wechat_protocol::wire::AddMessage::content | alloc::vec::Vec<u8> | MISSING DOC
 field wechat_protocol::wire::AddMessage::content_text | core::option::Option<alloc::string::String> | MISSING DOC
 field wechat_protocol::wire::AddMessage::created_at | u32 | MISSING DOC
@@ -679,6 +690,7 @@ fn wechat_protocol::AccountRequest::send_video | fn(&mut self, destination: &str
 fn wechat_protocol::AccountRequest::send_voice | fn(&mut self, destination: &str, client_id: &str, created_at: u32, duration_ms: u32, encoded: &[u8]) -> anyhow::Result<wechat_protocol::media_send::MediaSendResult> | MISSING DOC
 fn wechat_protocol::AccountRequest::sync | fn(&mut self, cursor: &[u8]) -> anyhow::Result<wechat_protocol::wire::SyncBatch> | MISSING DOC
 fn wechat_protocol::AccountRequest::sync_scene | fn(&mut self, cursor: &[u8], scene: u32) -> anyhow::Result<wechat_protocol::wire::SyncBatch> | MISSING DOC
+fn wechat_protocol::AccountRequest::verify_user_accept | fn(&mut self, request: &wechat_protocol::verify_user::VerifyUserAcceptRequest) -> anyhow::Result<wechat_protocol::verify_user::VerifyUserAcceptReply> | MISSING DOC
 fn wechat_protocol::AccountState::from_baseline_json | fn(input: &[u8]) -> anyhow::Result<Self> | Import an operator-selected private baseline checkpoint. This only converts explicit standalone credentials; it never searches or reads official files. Return diagnostics contain field names, never supplied credential values.
 fn wechat_protocol::AccountState::validate | fn(&self) -> anyhow::Result<()> | MISSING DOC
 fn wechat_protocol::DeviceProfile::generate | fn(device_type: alloc::string::String) -> anyhow::Result<Self> | MISSING DOC
@@ -761,6 +773,7 @@ fn wechat_protocol::Service::label | fn(self) -> &'static str | Label used at th
 fn wechat_protocol::ServiceRejected::find | fn(error: &anyhow::Error) -> core::option::Option<&Self> | Find this error anywhere in an error and its causes.
 fn wechat_protocol::ServiceRejected::is_session_rejected | fn(&self) -> bool | True when a session boundary returned [`Self::SESSION_REJECTED`]. The account needs a new login or renewal; repeating the request cannot help. The same code from another boundary, such as the CDN, is not included.
 fn wechat_protocol::ServiceRejected::new | fn(service: wechat_protocol::errors::Service, code: i32) -> Self | Build the error for one boundary and code.
+fn wechat_protocol::VerifyUserAcceptReply::accepted | fn(&self) -> bool | Whether the service accepted the action.
 fn wechat_protocol::business::AuthenticatedPacket::decode_verified_transport_reply | fn(&self, input: &[u8]) -> anyhow::Result<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)> | Call only on the plaintext returned by the authenticated MMTLS transport.
 fn wechat_protocol::business::AuthenticatedPacket::prepare | fn(state: &wechat_protocol::client::AccountState, cgi: u16, plain: &[u8]) -> anyhow::Result<Self> | MISSING DOC
 fn wechat_protocol::business::Prelogin::decrypt_reply | fn(&self, reply: &[u8]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
@@ -1016,6 +1029,9 @@ fn wechat_protocol::silk::decode | fn(input: &[u8]) -> anyhow::Result<alloc::vec
 fn wechat_protocol::silk::encode | fn(pcm: &[i16]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
 fn wechat_protocol::silk::validate_framing | fn(input: &[u8]) -> anyhow::Result<u32> | MISSING DOC
 fn wechat_protocol::silk::wav | fn(pcm: &[i16]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
+fn wechat_protocol::verify_user::VerifyUserAcceptReply::accepted | fn(&self) -> bool | Whether the service accepted the action.
+fn wechat_protocol::verify_user::decode_response | fn(bytes: &[u8]) -> anyhow::Result<wechat_protocol::verify_user::VerifyUserAcceptReply> | Decode an authenticated verifyuser reply, preserving signed rejections.
+fn wechat_protocol::verify_user::request | fn(state: &wechat_protocol::client::AccountState, input: &wechat_protocol::verify_user::VerifyUserAcceptRequest) -> anyhow::Result<alloc::vec::Vec<u8>> | Encode one contact-request acceptance with the account's BaseRequest.
 fn wechat_protocol::wire::apply_cursor | fn(prior: &[u8], incoming: &[u8], code: i32) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
 fn wechat_protocol::wire::auto_auth | fn(state: &wechat_protocol::client::AccountState, point: &[u8], computer_name: &str) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
 fn wechat_protocol::wire::avatar_request | fn(state: &wechat_protocol::client::AccountState, usernames: &[alloc::string::String]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
@@ -1088,6 +1104,8 @@ impl core::clone::Clone for wechat_protocol::SyncBatch | impl | -
 impl core::clone::Clone for wechat_protocol::SyncCommand | impl | -
 impl core::clone::Clone for wechat_protocol::TextSendOptions | impl | -
 impl core::clone::Clone for wechat_protocol::TextSendResult | impl | -
+impl core::clone::Clone for wechat_protocol::VerifyUserAcceptReply | impl | -
+impl core::clone::Clone for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl core::clone::Clone for wechat_protocol::VoiceChunk | impl | -
 impl core::clone::Clone for wechat_protocol::calls::app_session::AppAuthority | impl | -
 impl core::clone::Clone for wechat_protocol::calls::audio_packet::MediaContext | impl | -
@@ -1136,6 +1154,8 @@ impl core::clone::Clone for wechat_protocol::protobuf::Field | impl | -
 impl core::clone::Clone for wechat_protocol::protobuf::Value | impl | -
 impl core::clone::Clone for wechat_protocol::push::Notification | impl | -
 impl core::clone::Clone for wechat_protocol::quote_send::QuoteReference | impl | -
+impl core::clone::Clone for wechat_protocol::verify_user::VerifyUserAcceptReply | impl | -
+impl core::clone::Clone for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl core::clone::Clone for wechat_protocol::wire::AddMessage | impl | -
 impl core::clone::Clone for wechat_protocol::wire::AvatarBytes | impl | -
 impl core::clone::Clone for wechat_protocol::wire::ContactLookup | impl | -
@@ -1164,6 +1184,8 @@ impl core::cmp::Eq for wechat_protocol::Service | impl | -
 impl core::cmp::Eq for wechat_protocol::ServiceRejected | impl | -
 impl core::cmp::Eq for wechat_protocol::SessionReadNotification | impl | -
 impl core::cmp::Eq for wechat_protocol::SessionReadReply | impl | -
+impl core::cmp::Eq for wechat_protocol::VerifyUserAcceptReply | impl | -
+impl core::cmp::Eq for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl core::cmp::Eq for wechat_protocol::calls::app_session::AppAuthority | impl | -
 impl core::cmp::Eq for wechat_protocol::calls::audio_packet::MediaContext | impl | -
 impl core::cmp::Eq for wechat_protocol::calls::audio_packet::MediaEpoch | impl | -
@@ -1192,6 +1214,8 @@ impl core::cmp::Eq for wechat_protocol::protobuf::Field | impl | -
 impl core::cmp::Eq for wechat_protocol::protobuf::Value | impl | -
 impl core::cmp::Eq for wechat_protocol::push::Notification | impl | -
 impl core::cmp::Eq for wechat_protocol::quote_send::QuoteReference | impl | -
+impl core::cmp::Eq for wechat_protocol::verify_user::VerifyUserAcceptReply | impl | -
+impl core::cmp::Eq for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl core::cmp::PartialEq for wechat_protocol::AccountIdentity | impl | -
 impl core::cmp::PartialEq for wechat_protocol::AccountInterrupted | impl | -
 impl core::cmp::PartialEq for wechat_protocol::AccountLifecycle | impl | -
@@ -1208,6 +1232,8 @@ impl core::cmp::PartialEq for wechat_protocol::Service | impl | -
 impl core::cmp::PartialEq for wechat_protocol::ServiceRejected | impl | -
 impl core::cmp::PartialEq for wechat_protocol::SessionReadNotification | impl | -
 impl core::cmp::PartialEq for wechat_protocol::SessionReadReply | impl | -
+impl core::cmp::PartialEq for wechat_protocol::VerifyUserAcceptReply | impl | -
+impl core::cmp::PartialEq for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl core::cmp::PartialEq for wechat_protocol::calls::app_session::AppAuthority | impl | -
 impl core::cmp::PartialEq for wechat_protocol::calls::audio_packet::MediaContext | impl | -
 impl core::cmp::PartialEq for wechat_protocol::calls::audio_packet::MediaEpoch | impl | -
@@ -1236,6 +1262,8 @@ impl core::cmp::PartialEq for wechat_protocol::protobuf::Field | impl | -
 impl core::cmp::PartialEq for wechat_protocol::protobuf::Value | impl | -
 impl core::cmp::PartialEq for wechat_protocol::push::Notification | impl | -
 impl core::cmp::PartialEq for wechat_protocol::quote_send::QuoteReference | impl | -
+impl core::cmp::PartialEq for wechat_protocol::verify_user::VerifyUserAcceptReply | impl | -
+impl core::cmp::PartialEq for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl core::convert::From<wechat_protocol::calls::personal::HostOperation> for wechat_protocol::calls::host_policy::CallHostRoute | impl | -
 impl core::convert::From<wechat_protocol::calls::personal::HostOperation> for wechat_protocol::calls::personal::HostOperation | impl | -
 impl core::default::Default for wechat_protocol::AuthSnapshot | impl | -
@@ -1276,6 +1304,8 @@ impl core::fmt::Debug for wechat_protocol::SessionReadNotification | impl | -
 impl core::fmt::Debug for wechat_protocol::SessionReadReply | impl | -
 impl core::fmt::Debug for wechat_protocol::TextSendOptions | impl | -
 impl core::fmt::Debug for wechat_protocol::TextSendResult | impl | -
+impl core::fmt::Debug for wechat_protocol::VerifyUserAcceptReply | impl | -
+impl core::fmt::Debug for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl core::fmt::Debug for wechat_protocol::calls::app_session::AppAuthority | impl | -
 impl core::fmt::Debug for wechat_protocol::calls::audio_packet::MediaContext | impl | -
 impl core::fmt::Debug for wechat_protocol::calls::audio_packet::MediaEpoch | impl | -
@@ -1307,6 +1337,8 @@ impl core::fmt::Debug for wechat_protocol::openim::OpenImContact | impl | -
 impl core::fmt::Debug for wechat_protocol::openim::OpenImServiceError | impl | -
 impl core::fmt::Debug for wechat_protocol::push::Notification | impl | -
 impl core::fmt::Debug for wechat_protocol::quote_send::QuoteReference | impl | -
+impl core::fmt::Debug for wechat_protocol::verify_user::VerifyUserAcceptReply | impl | -
+impl core::fmt::Debug for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl core::fmt::Debug for wechat_protocol::wire::Heartbeat | impl | -
 impl core::fmt::Debug for wechat_protocol::wire::TextSendResult | impl | -
 impl core::fmt::Display for wechat_protocol::AccountInterrupted | impl | -
@@ -1366,6 +1398,8 @@ impl core::marker::StructuralPartialEq for wechat_protocol::Service | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::ServiceRejected | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::SessionReadNotification | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::SessionReadReply | impl | -
+impl core::marker::StructuralPartialEq for wechat_protocol::VerifyUserAcceptReply | impl | -
+impl core::marker::StructuralPartialEq for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::calls::app_session::AppAuthority | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::calls::audio_packet::MediaContext | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::calls::audio_packet::MediaEpoch | impl | -
@@ -1394,6 +1428,8 @@ impl core::marker::StructuralPartialEq for wechat_protocol::protobuf::Field | im
 impl core::marker::StructuralPartialEq for wechat_protocol::protobuf::Value | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::push::Notification | impl | -
 impl core::marker::StructuralPartialEq for wechat_protocol::quote_send::QuoteReference | impl | -
+impl core::marker::StructuralPartialEq for wechat_protocol::verify_user::VerifyUserAcceptReply | impl | -
+impl core::marker::StructuralPartialEq for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl core::ops::drop::Drop for wechat_protocol::AccountState | impl | -
 impl core::ops::drop::Drop for wechat_protocol::AuthSnapshot | impl | -
 impl core::ops::drop::Drop for wechat_protocol::LoginAttempt | impl | -
@@ -1432,6 +1468,7 @@ impl serde_core::de::Deserialize<'de> for wechat_protocol::SessionReadNotificati
 impl serde_core::de::Deserialize<'de> for wechat_protocol::SyncBatch | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::SyncCommand | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::TextSendResult | impl<'de> | -
+impl serde_core::de::Deserialize<'de> for wechat_protocol::VerifyUserAcceptRequest | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::VoiceChunk | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::contact_sync::ContactSyncBatch | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::file_upload::FileUploadReservation | impl<'de> | -
@@ -1453,6 +1490,7 @@ impl serde_core::de::Deserialize<'de> for wechat_protocol::mmtls::ShortSession |
 impl serde_core::de::Deserialize<'de> for wechat_protocol::mmtls::Ticket | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::openim::OpenImContact | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::quote_send::QuoteReference | impl<'de> | -
+impl serde_core::de::Deserialize<'de> for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::wire::AddMessage | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::wire::AvatarBytes | impl<'de> | -
 impl serde_core::de::Deserialize<'de> for wechat_protocol::wire::ContactLookup | impl<'de> | -
@@ -1493,6 +1531,7 @@ impl serde_core::ser::Serialize for wechat_protocol::SessionReadNotification | i
 impl serde_core::ser::Serialize for wechat_protocol::SyncBatch | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::SyncCommand | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::TextSendResult | impl | -
+impl serde_core::ser::Serialize for wechat_protocol::VerifyUserAcceptRequest | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::VoiceChunk | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::contact_sync::ContactSyncBatch | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::file_upload::FileUploadReservation | impl | -
@@ -1514,6 +1553,7 @@ impl serde_core::ser::Serialize for wechat_protocol::mmtls::ShortSession | impl 
 impl serde_core::ser::Serialize for wechat_protocol::mmtls::Ticket | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::openim::OpenImContact | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::quote_send::QuoteReference | impl | -
+impl serde_core::ser::Serialize for wechat_protocol::verify_user::VerifyUserAcceptRequest | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::wire::AddMessage | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::wire::AvatarBytes | impl | -
 impl serde_core::ser::Serialize for wechat_protocol::wire::ContactLookup | impl | -
@@ -1551,6 +1591,7 @@ mod wechat_protocol::protobuf | - | Bounded numbered protobuf primitives. Unknow
 mod wechat_protocol::push | - | Persistent authenticated incoming notifications. The outer longlink command is distinct from the encrypted business CGI: heartbeat 238/518, sync 121/138.
 mod wechat_protocol::quote_send | - | Quoted app-message metadata. Callers resolve the selected message and persist this reference and the final XML before submitting a send attempt.
 mod wechat_protocol::silk | - | Bounded independent SILK SDK wrapper. Public source/license pins are under vendor/silk; no WeChat codec library is linked or loaded.
+mod wechat_protocol::verify_user | - | Accept one inbound contact request through the supported contact operation.
 mod wechat_protocol::wire | - | Typed numbered business messages for the supported native profile.
 struct wechat_protocol::AccountIdentity | struct { public fields } | MISSING DOC
 struct wechat_protocol::AccountLease | struct { private fields } | Cheap authority check for account workers. It carries no credentials and becomes invalid on shutdown or any accepted credential renewal. It cannot replace the final submission guard on an authenticated signaling request.
@@ -1592,6 +1633,8 @@ struct wechat_protocol::SyncBatch | struct { public fields } | MISSING DOC
 struct wechat_protocol::SyncCommand | struct { public fields } | MISSING DOC
 struct wechat_protocol::TextSendOptions | struct { public fields } | Correlation values must be recorded with the application's send intent before submission. Neither a task ID nor a transport error authorizes a blind retry.
 struct wechat_protocol::TextSendResult | struct { public fields } | MISSING DOC
+struct wechat_protocol::VerifyUserAcceptReply | struct { public fields } | The reply for one contact-request action, retaining the signed code.
+struct wechat_protocol::VerifyUserAcceptRequest | struct { public fields } | One contact request to act on, exactly as received with that request.
 struct wechat_protocol::VoiceChunk | struct { public fields } | MISSING DOC
 struct wechat_protocol::business::AuthenticatedPacket | struct { private fields } | MISSING DOC
 struct wechat_protocol::business::Envelope | struct { public fields } | MISSING DOC
@@ -1665,6 +1708,8 @@ struct wechat_protocol::openim::OpenImServiceError | struct { public fields } | 
 struct wechat_protocol::protobuf::Field | struct { public fields } | MISSING DOC
 struct wechat_protocol::push::Notification | struct { public fields } | MISSING DOC
 struct wechat_protocol::quote_send::QuoteReference | struct { public fields } | A reference to the immediate selected message. App messages retain raw type 49 here; their application subtype belongs in their serialized content.
+struct wechat_protocol::verify_user::VerifyUserAcceptReply | struct { public fields } | The reply for one contact-request action, retaining the signed code.
+struct wechat_protocol::verify_user::VerifyUserAcceptRequest | struct { public fields } | One contact request to act on, exactly as received with that request.
 struct wechat_protocol::wire::AddMessage | struct { public fields } | MISSING DOC
 struct wechat_protocol::wire::AvatarBytes | struct { public fields } | MISSING DOC
 struct wechat_protocol::wire::ContactLookup | struct { public fields } | MISSING DOC

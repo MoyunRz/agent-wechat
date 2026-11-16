@@ -1070,6 +1070,12 @@ remark: string | null,
  */
 alias: string | null, 
 /**
+ * The official `contact.local_type` bit: 2 marks group chats and 1 marks a server-confirmed
+ * contact. Null when the row was created from observed messages and the contact stream has
+ * not confirmed it yet.
+ */
+localType?: bigint, 
+/**
  * Relationship to this account. It currently always reports `unknown`, including for saved
  * friends.
  */

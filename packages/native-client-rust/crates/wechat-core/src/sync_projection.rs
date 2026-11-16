@@ -554,7 +554,21 @@ impl Core {
                 _ => true,
             };
             if self.store.runtime(account, &fields_applied)?.is_none() {
-                let patch = self.upstream.contact_patch(&contact)?;
+                // A ModContact command confirms the row as a saved contact in the
+                // official schema, whose contact table carries `local_type` with an
+                // official index: 2 marks group chats and 1 marks every other
+                // contact. Message-derived minimal rows keep NULL until this
+                // confirmation arrives.
+                let local_type = if contact.username.ends_with("@chatroom") {
+                    2
+                } else {
+                    1
+                };
+                let mut patch = self.upstream.contact_patch(&contact)?;
+                patch.fields.insert(
+                    "local_type".into(),
+                    wechat_profile::SqlValue::Integer(local_type.to_string()),
+                );
                 let pin_phase = self.store.runtime(account, &pin_applied)?;
                 let mut applied_pin = pin.is_some() && pin_phase.is_some();
                 let mut pin_changed = pin.is_some() && pin_phase.as_deref() == Some(b"changed");

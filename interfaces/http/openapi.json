@@ -1524,6 +1524,14 @@
             "description": "Contact ID. It is the same as `username`.",
             "type": "string"
           },
+          "localType": {
+            "description": "The official `contact.local_type` bit: 2 marks group chats and 1 marks a server-confirmed\ncontact. Null when the row was created from observed messages and the contact stream has\nnot confirmed it yet.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "nickname": {
             "description": "The name the contact chose for themselves. Null when none is saved.",
             "type": [
@@ -1555,6 +1563,46 @@
           "remark",
           "alias",
           "relation"
+        ],
+        "type": "object"
+      },
+      "NativeContactAcceptRequest": {
+        "additionalProperties": false,
+        "description": "Request to accept one inbound contact request.",
+        "properties": {
+          "encryptUsername": {
+            "description": "The request's `encryptusername`, copied exactly as the account received it.",
+            "type": "string"
+          },
+          "scene": {
+            "description": "The request's scene value, copied exactly as the account received it.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ticket": {
+            "description": "The request's ticket, copied exactly as the account received it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encryptUsername",
+          "ticket",
+          "scene"
+        ],
+        "type": "object"
+      },
+      "NativeContactGateRequest": {
+        "additionalProperties": false,
+        "description": "Request to open or close the per-account contact-request acceptance gate.",
+        "properties": {
+          "enabled": {
+            "description": "True to allow contact-request acceptances; false to block them. The gate\nstarts closed for every account.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -1597,46 +1645,6 @@
           "coverage",
           "sourceGeneration",
           "asOfEventCursor"
-        ],
-        "type": "object"
-      },
-      "NativeContactAcceptRequest": {
-        "additionalProperties": false,
-        "description": "Request to accept one inbound contact request.",
-        "properties": {
-          "encryptUsername": {
-            "description": "The request's `encryptusername`, copied exactly as the account received it.",
-            "type": "string"
-          },
-          "scene": {
-            "description": "The request's scene value, copied exactly as the account received it.",
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "ticket": {
-            "description": "The request's ticket, copied exactly as the account received it.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "encryptUsername",
-          "scene",
-          "ticket"
-        ],
-        "type": "object"
-      },
-      "NativeContactGateRequest": {
-        "additionalProperties": false,
-        "description": "Request to open or close the per-account contact-request acceptance gate.",
-        "properties": {
-          "enabled": {
-            "description": "True to allow contact-request acceptances; false to block them. The gate\nstarts closed for every account.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
         ],
         "type": "object"
       },

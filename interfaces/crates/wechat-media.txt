@@ -1,4 +1,4 @@
-# Public API of the wechat-media crate (default features, x86_64-unknown-linux-gnu). Generated from rustdoc JSON; do not edit.
+# Public API of the wechat-media crate (default features, aarch64-apple-darwin). Generated from rustdoc JSON; do not edit.
 # Run `pnpm interfaces` after changing the crate. Format: ITEM | SIGNATURE | DOC SUMMARY
 const wechat_media::MAX_FILE_BYTES | usize | Native ordinary-file plaintext limit, shared by transport and local storage.
 const wechat_media::MAX_IMAGE_BYTES | usize | MISSING DOC

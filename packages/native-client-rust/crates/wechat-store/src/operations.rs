@@ -698,6 +698,37 @@ impl Store {
     pub fn pending_contact_sync(&self, account: &str) -> Result<Vec<(String, Vec<u8>)>> {
         self.pending_sync_stream(account, "contact")
     }
+    /// Every retained contact-stream batch, projected or blocked, with its
+    /// sealed payload. Local repair reads these owned bytes; callers never
+    /// resend or start a transfer from them.
+    pub fn retained_contact_sync_batches(&self, account: &str) -> Result<Vec<(String, Vec<u8>)>> {
+        self.control(account, |db| {
+            let mut out = Vec::new();
+            let mut last_created = String::new();
+            let mut last_id = String::new();
+            loop {
+                let mut q = db.prepare(
+                    "SELECT id,payload,created_at FROM apply_intents WHERE stream='contact' AND (created_at>?1 OR (created_at=?1 AND id>?2)) ORDER BY created_at,id LIMIT 200",
+                )?;
+                let rows: Vec<(String, Vec<u8>, String)> = q
+                    .query_map(params![last_created, last_id], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                drop(q);
+                let fetched = rows.len();
+                if let Some((id, _, created_at)) = rows.last() {
+                    last_id = id.clone();
+                    last_created = created_at.clone();
+                }
+                out.extend(rows.into_iter().map(|(id, payload, _)| (id, payload)));
+                if fetched < 200 {
+                    break;
+                }
+            }
+            Ok(out)
+        })
+    }
     pub fn pending_contact_sync_count(&self, account: &str) -> Result<usize> {
         self.control(account, |db| {
             Ok(db.query_row(

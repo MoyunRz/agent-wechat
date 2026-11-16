@@ -278,6 +278,12 @@ pub struct NativeContact {
     pub remark: Option<String>,
     /// The custom WeChat ID the contact chose, which they can change. Null when none is saved.
     pub alias: Option<String>,
+    /// The official `contact.local_type` bit: 2 marks group chats and 1 marks a server-confirmed
+    /// contact. Null when the row was created from observed messages and the contact stream has
+    /// not confirmed it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub local_type: Option<i64>,
     /// Relationship to this account. It currently always reports `unknown`, including for saved
     /// friends.
     pub relation: String,
