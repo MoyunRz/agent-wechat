@@ -253,7 +253,7 @@ fn fields(message: &AddMessage, body: &[u8], sort: i64) -> Result<(RawFields, St
     if message.content.len() > 4 * 1024 * 1024 {
         bail!("message_content_too_large")
     }
-    if ![1, 3, 34, 43, 47, 48, 49, 10000].contains(&message.message_type) {
+    if ![1, 3, 34, 37, 43, 47, 48, 49, 10000].contains(&message.message_type) {
         bail!("unsupported_message_projection_type")
     }
     if message.message_type == 48 && crate::locations::parse(std::str::from_utf8(body)?).is_none() {
@@ -507,7 +507,9 @@ impl Core {
                 self.store.put_runtime(account, receipt, b"1")?;
                 return Ok(());
             }
-            if ![1, 3, 34, 43, 47, 48, 49, 10000].contains(&message.message_type) {
+            // 37 (contact request) projects as an ordinary stored message in the
+            // fmessage thread; the friend-request API derives its list from it.
+            if ![1, 3, 34, 37, 43, 47, 48, 49, 10000].contains(&message.message_type) {
                 let blocked = message_blocker(&message);
                 if matches!(message.message_type, 51 | 10002) {
                     self.store.append_event_once(

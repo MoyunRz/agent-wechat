@@ -41,6 +41,8 @@ mod saved_login;
 mod session_auth;
 use session_auth::authentication_required;
 pub(crate) use session_auth::SessionFence;
+#[path = "friend_requests.rs"]
+pub(crate) mod friend_requests;
 #[path = "status_control.rs"]
 mod status_control;
 #[path = "system_control.rs"]

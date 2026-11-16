@@ -122,6 +122,7 @@ fn message_summary(message: &Value, sender_name: Option<&str>) -> Value {
                 .filter(|s| !s.is_empty())
                 .unwrap_or("Shared link"),
             (49, _) => "Shared content",
+            (37, _) => "Friend request",
             (10000, _) => message["body"]
                 .as_str()
                 .and_then(crate::profile::plain_system_notice)

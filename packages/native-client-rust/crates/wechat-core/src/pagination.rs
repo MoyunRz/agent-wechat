@@ -232,7 +232,8 @@ impl Core {
             for value in
                 self.normalize_recalled_batch(account, messages, own.as_deref(), &reader)?
             {
-                let value = value?;
+                let mut value = value?;
+                self.enrich_friend_request_status(account, &mut value)?;
                 encoded_bytes = encoded_bytes.saturating_add(serde_json::to_vec(&value)?.len());
                 if encoded_bytes > 32 * 1024 * 1024 {
                     bail!("pagination_capacity_exceeded");
@@ -454,6 +455,9 @@ impl Core {
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
+            for message in delivered.values_mut() {
+                self.enrich_friend_request_status(account, message)?;
+            }
             for (offset, reference) in references.into_iter().enumerate() {
                 let id = crate::message_id(&reference.id)?;
                 let item = if offset < limit {
@@ -525,11 +529,13 @@ impl Core {
                         cursor: cursor.clone(),
                         ..Default::default()
                     })?;
-                    (
-                        self.normalize_recalled_batch(account, page.items, own, reader)?
-                            .collect::<Result<Vec<_>>>()?,
-                        page.next_cursor,
-                    )
+                    let mut items = self
+                        .normalize_recalled_batch(account, page.items, own, reader)?
+                        .collect::<Result<Vec<_>>>()?;
+                    for value in &mut items {
+                        self.enrich_friend_request_status(account, value)?;
+                    }
+                    (items, page.next_cursor)
                 }
                 _ => bail!("invalid_request"),
             };

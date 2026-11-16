@@ -14,6 +14,43 @@ const LAST_KEY: &str = "verify-user-last";
 const DAILY_LIMIT: u32 = 20;
 const MIN_INTERVAL_SECS: u64 = 10;
 
+/// One contact-request action multiplexed over the verifyuser endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContactRequestAction {
+    Accept,
+    Decline,
+}
+
+impl ContactRequestAction {
+    fn operation_kind(self) -> &'static str {
+        match self {
+            Self::Accept => "contact-request-accept",
+            Self::Decline => "contact-request-decline",
+        }
+    }
+
+    fn event_name(self) -> &'static str {
+        match self {
+            Self::Accept => "contact.request_accepted",
+            Self::Decline => "contact.request_declined",
+        }
+    }
+
+    fn failed_event_name(self) -> &'static str {
+        match self {
+            Self::Accept => "contact.request_accept_failed",
+            Self::Decline => "contact.request_decline_failed",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Decline => "decline",
+        }
+    }
+}
+
 fn hash(value: &impl Serialize) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }
@@ -123,6 +160,47 @@ impl Core {
         scene: u32,
         key: &str,
     ) -> Result<Operation> {
+        self.submit_contact_request(
+            account,
+            encrypt_username,
+            ticket,
+            scene,
+            key,
+            ContactRequestAction::Accept,
+        )
+        .await
+    }
+
+    /// Submit one contact-request decline under the same gate, rate limit,
+    /// idempotency and audit semantics as acceptance.
+    pub async fn decline_contact_request(
+        self: &Arc<Self>,
+        account: &str,
+        encrypt_username: &str,
+        ticket: &str,
+        scene: u32,
+        key: &str,
+    ) -> Result<Operation> {
+        self.submit_contact_request(
+            account,
+            encrypt_username,
+            ticket,
+            scene,
+            key,
+            ContactRequestAction::Decline,
+        )
+        .await
+    }
+
+    async fn submit_contact_request(
+        self: &Arc<Self>,
+        account: &str,
+        encrypt_username: &str,
+        ticket: &str,
+        scene: u32,
+        key: &str,
+        action: ContactRequestAction,
+    ) -> Result<Operation> {
         if self.stopping.load(Ordering::Acquire) {
             bail!("service_stopping");
         }
@@ -137,9 +215,10 @@ impl Core {
         let username = encrypt_username.to_owned();
         let ticket = ticket.to_owned();
         let worker_key = key.to_owned();
+        let operation_kind = action.operation_kind();
         core.start_operation(
             account,
-            "contact-request-accept",
+            operation_kind,
             move |core, account| async move {
                 let guard = core.lock_account(&account).await?;
                 let material = request_material_hash(&username, &ticket, scene)?;
@@ -159,10 +238,12 @@ impl Core {
                 let key_hash = hash(&worker_key)?;
                 let rpc_core = core.clone();
                 let rpc_account = account.clone();
+                let action_for_rpc = action;
                 let outcome = blocking(move || {
                     let _guard = guard;
-                    rpc_core.native_request(&rpc_account, &mut state, |request| {
-                        request.verify_user_accept(&input)
+                    rpc_core.native_request(&rpc_account, &mut state, |request| match action_for_rpc {
+                        ContactRequestAction::Accept => request.verify_user_accept(&input),
+                        ContactRequestAction::Decline => request.verify_user_decline(&input),
                     })
                 })
                 .await;
@@ -175,6 +256,7 @@ impl Core {
                                 "accepted": reply.accepted(),
                                 "message": reply.message,
                                 "scene": scene,
+                                "action": action.name(),
                             }
                         }))?;
                         core.store.put_runtime(
@@ -184,9 +266,10 @@ impl Core {
                         )?;
                         core.store.append_event(
                             &account,
-                            "contact.request_accepted",
+                            action.event_name(),
                             &json!({
                                 "scene": scene,
+                                "action": action.name(),
                                 "serviceCode": reply.service_code,
                                 "accepted": reply.accepted(),
                                 "encryptUsernameLength": username.len(),
@@ -204,9 +287,10 @@ impl Core {
                     Err(error) => {
                         core.store.append_event(
                             &account,
-                            "contact.request_accept_failed",
+                            action.failed_event_name(),
                             &json!({
                                 "scene": scene,
+                                "action": action.name(),
                                 "encryptUsernameLength": username.len(),
                                 "ticketLength": ticket.len(),
                                 "materialHash": material,

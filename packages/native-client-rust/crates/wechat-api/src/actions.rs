@@ -41,6 +41,19 @@ pub(super) fn routes() -> Router<App> {
             "/v1/accounts/{a}/contacts/verify-user/gate",
             post(contact_gate),
         )
+        .api_route("/v1/accounts/{a}/friend-requests", get(friend_requests))
+        .api_route(
+            "/v1/accounts/{a}/friend-requests/{id}/preflight",
+            get(friend_request_preflight),
+        )
+        .api_route(
+            "/v1/accounts/{a}/friend-requests/{id}/accept",
+            post(accept_friend_request),
+        )
+        .api_route(
+            "/v1/accounts/{a}/friend-requests/{id}/decline",
+            post(decline_friend_request),
+        )
         .api_route("/v1/accounts/{a}/groups/{id}/refresh", post(refresh_group))
         .api_route(
             "/v1/accounts/{a}/groups/{id}/members/refresh",
@@ -123,6 +136,54 @@ async fn contact_gate(
     let _guard = app.core.lock_account(&a).await?;
     app.core.set_contact_request_gate(&a, input.enabled)?;
     Ok(Json(json!({"enabled": input.enabled})))
+}
+async fn friend_requests(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "read")?;
+    Ok(Json(app.core.friend_requests(&a)?))
+}
+async fn friend_request_preflight(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path((a, id)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "read")?;
+    Ok(Json(app.core.friend_request_preflight(&a, &id)?))
+}
+async fn accept_friend_request(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path((a, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    c.require(Some(&a), "send")?;
+    let key = idempotency_key(&headers)?;
+    let operation = app.core.accept_friend_request(&a, &id, key).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        checked::<contracts::NativeOperation>(
+            serde_json::to_value(operation).map_err(anyhow::Error::from)?,
+        )?,
+    ))
+}
+async fn decline_friend_request(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path((a, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    c.require(Some(&a), "send")?;
+    let key = idempotency_key(&headers)?;
+    let operation = app.core.decline_friend_request(&a, &id, key).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        checked::<contracts::NativeOperation>(
+            serde_json::to_value(operation).map_err(anyhow::Error::from)?,
+        )?,
+    ))
 }
 async fn update_settings(
     State(app): State<App>,

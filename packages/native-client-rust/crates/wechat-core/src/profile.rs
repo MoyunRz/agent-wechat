@@ -245,6 +245,10 @@ impl Core {
         let items = self
             .normalize_recalled_batch(account, page.items, own.as_deref(), &reader)?
             .collect::<Result<Vec<_>>>()?;
+        let mut items = items;
+        for value in &mut items {
+            self.enrich_friend_request_status(account, value)?;
+        }
         Ok(
             json!({"items":items,"nextCursor":page.next_cursor,"sourceGeneration":page.source_generation,"coverage":page.coverage}),
         )
@@ -252,12 +256,14 @@ impl Core {
     pub fn message(&self, account: &str, id: &str) -> Result<Value> {
         let reader = self.profile_reader_owned(account)?;
         let own = self.profile_username(account)?;
-        self.normalize_recalled(
+        let mut value = self.normalize_recalled(
             account,
             reader.message(&source_message_id(id)?, own.as_deref())?,
             own.as_deref(),
             &reader,
-        )
+        )?;
+        self.enrich_friend_request_status(account, &mut value)?;
+        Ok(value)
     }
     pub fn image(
         &self,
@@ -371,6 +377,26 @@ pub(crate) fn normalized_message(
     let mut value = json!({"id":message_id(&msg.id)?,"accountId":account,"threadId":thread,"peerId":thread,"serverId":msg.server_message_id,"senderId":sender,"direction":direction,"type":msg.message_type,"appMessageType":app_type,"quote":quote,"link":link,"body":text,"createdAt":created,"mentions":mentions(msg.source.text.as_deref(),own),"media":[],"version":generation,"projection":"official-profile"});
     if let Some(location) = location {
         value["location"] = serde_json::to_value(location)?;
+    }
+    // Inbound contact requests render as interactive cards: expose the parsed
+    // request fields (never the ticket or encryptusername) for the chat UI.
+    if msg.message_type == 37 {
+        if let Some(content) = msg.content.text.as_deref() {
+            if let Some(material) = crate::runtime::friend_requests::parse_request_material(
+                &message_id(&msg.id)?,
+                msg.create_time,
+                content,
+            ) {
+                value["friendRequest"] = json!({
+                    "fromUsername": material.from_username,
+                    "fromNickname": material.from_nickname,
+                    "encryptUsername": Value::Null,
+                    "scene": material.scene,
+                    "greeting": material.greeting,
+                    "avatar": Value::Null,
+                });
+            }
+        }
     }
     Ok(value)
 }

@@ -17,6 +17,10 @@ const MAX_TICKET_BYTES: usize = 16384;
 
 /// Opcode accepting the contact request carried in field9.
 pub const ACCEPT_OPCODE: u32 = 3;
+/// Opcode declining the contact request carried in field9. Candidate from the
+/// protocol spec {2=request, 3=accept, 4=decline}; the signed service reply
+/// validates it during rollout.
+pub const DECLINE_OPCODE: u32 = 4;
 
 /// One contact request to act on, exactly as received with that request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,8 +56,9 @@ fn supplied_text(value: &str, max: usize) -> bool {
         && !value.chars().any(char::is_control)
 }
 
-/// Encode one contact-request acceptance with the account's BaseRequest.
-pub fn request(state: &AccountState, input: &VerifyUserAcceptRequest) -> Result<Vec<u8>> {
+/// Encode one contact-request action (accept or decline) with the account's
+/// BaseRequest. The wire layout is identical; only the opcode differs.
+pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u32) -> Result<Vec<u8>> {
     state.validate()?;
     ensure!(
         input.encrypt_username.len() <= MAX_IDENTITY_BYTES
@@ -70,10 +75,15 @@ pub fn request(state: &AccountState, input: &VerifyUserAcceptRequest) -> Result<
     ])?;
     p::message(&[
         p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?),
-        p::uint(2, u64::from(ACCEPT_OPCODE)),
+        p::uint(2, u64::from(opcode)),
         p::uint(3, u64::from(input.scene)),
         p::bytes(9, &entry),
     ])
+}
+
+/// Encode one contact-request acceptance with the account's BaseRequest.
+pub fn request(state: &AccountState, input: &VerifyUserAcceptRequest) -> Result<Vec<u8>> {
+    encoded(state, input, ACCEPT_OPCODE)
 }
 
 fn optional_text(fields: &[p::Field], number: u32, max: usize) -> Result<Option<String>> {
@@ -113,7 +123,26 @@ impl NativeClient {
         state: &mut AccountState,
         input: &VerifyUserAcceptRequest,
     ) -> Result<VerifyUserAcceptReply> {
-        let request = zeroize::Zeroizing::new(request(state, input)?);
+        self.verify_user_action_snapshot(state, input, ACCEPT_OPCODE)
+    }
+
+    /// Submit exactly one contact-request decline under the same snapshot
+    /// semantics as acceptance.
+    pub(crate) fn verify_user_decline_snapshot(
+        &self,
+        state: &mut AccountState,
+        input: &VerifyUserAcceptRequest,
+    ) -> Result<VerifyUserAcceptReply> {
+        self.verify_user_action_snapshot(state, input, DECLINE_OPCODE)
+    }
+
+    fn verify_user_action_snapshot(
+        &self,
+        state: &mut AccountState,
+        input: &VerifyUserAcceptRequest,
+        opcode: u32,
+    ) -> Result<VerifyUserAcceptReply> {
+        let request = zeroize::Zeroizing::new(encoded(state, input, opcode)?);
         let reply = self.authenticated_rpc(state, CGI, PATH, &request)?;
         decode_response(&reply)
     }
