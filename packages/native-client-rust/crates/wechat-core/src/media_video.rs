@@ -99,7 +99,10 @@ pub(super) fn prepare_normal(
         "-sn",
         "-dn",
         "-vf",
-        "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30",
+        // Full-range sources (yuvj420p or color_range=pc) keep their range
+        // through the encoder on FFmpeg 7 and later unless it is converted
+        // here, and the result would fail the yuv420p check below.
+        "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:out_range=tv,setsar=1,fps=30",
         "-c:v",
         "libx264",
         "-preset",
