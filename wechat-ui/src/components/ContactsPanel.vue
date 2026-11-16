@@ -88,15 +88,44 @@ function stateOf(item: PendingFriendRequest): { loading: boolean, result?: Frien
 
 const BLOCKING_LABELS: Record<string, string> = {
   not_pending: '申请已失效',
+  already_handled: '申请已处理',
   encrypt_username_missing: '缺少加密用户名',
   ticket_missing: '缺少确认票据',
-  scene_missing: '缺少来源信息',
+  missing_scene: '缺少来源信息，请在手机上处理',
   already_friends: '你们已经是好友了',
+  gate_closed: '通过开关未开启',
+}
+
+/** 好友申请来源（verifyuser scene）映射；未知值回退为 scene 编号。 */
+const SCENE_LABELS: Record<number, string> = {
+  3: '通过微信号搜索',
+  12: '通过 QQ 号添加',
+  14: '通过群聊添加',
+  15: '通过手机号搜索',
+  25: '通过好友名片添加',
+  30: '通过二维码添加',
+  33: '通过通讯录添加',
+}
+
+function sceneLabel(item: PendingFriendRequest): string {
+  const scene = item.scene
+  if (scene == null)
+    return '来源未知'
+  return SCENE_LABELS[scene] ?? `来源 scene ${scene}`
+}
+
+function formatRequestTime(value: string | null | undefined): string {
+  if (!value)
+    return '未知'
+  const time = new Date(value)
+  if (Number.isNaN(time.getTime()))
+    return value
+  return time.toLocaleString('zh-CN', { hour12: false })
 }
 
 function preflightLabel(result: FriendRequestPreflight): string {
   if (result.ready)
-    return `参数就绪 · scene ${result.scene ?? '-'}`
+    return '申请可处理'
   if (!result.found)
     return '申请已失效'
   const reasons = result.blocking.map(reason => BLOCKING_LABELS[reason] ?? reason)
@@ -118,7 +147,7 @@ function resultClass(item: PendingFriendRequest): string {
 
 /**
  * 干跑校验：只读取本地参数并检查完整性，不向微信服务器发送任何请求。
- * 结果仅用于判断是否具备「通过」条件，本版本不提供真正的通过操作。
+ * 结果仅用于判断是否具备「通过」条件。
  */
 async function checkRequest(item: PendingFriendRequest): Promise<void> {
   if (preflightStates.value[item.username]?.loading)
@@ -142,6 +171,66 @@ async function checkRequest(item: PendingFriendRequest): Promise<void> {
         error: userFacingErrorMessage(value, '检查失败，请稍后重试。'),
       },
     }
+  }
+}
+
+/** 通过申请进行中：按申请人记录，避免并发点击。 */
+const accepting = ref<Record<string, boolean>>({})
+
+/** 详情弹层当前展示的申请；null 表示关闭。 */
+const detailRequest = ref<PendingFriendRequest | null>(null)
+
+function openDetail(item: PendingFriendRequest): void {
+  detailRequest.value = item
+  if (!stateOf(item))
+    void checkRequest(item)
+}
+
+function closeDetail(): void {
+  detailRequest.value = null
+}
+
+function acceptDisabled(item: PendingFriendRequest): boolean {
+  if (accepting.value[item.username])
+    return true
+  const result = stateOf(item)?.result
+  // 校验过且确认不可通过时禁用；未校验时保持可用，由服务端兜底校验。
+  return result != null && !result.ready && result.found
+}
+
+/** 同意/拒绝好友申请：材料由 hub 从落库消息读取，成功后刷新列表与通讯录。 */
+async function actOnRequest(item: PendingFriendRequest, action: 'accept' | 'decline'): Promise<void> {
+  if (accepting.value[item.username])
+    return
+  accepting.value = { ...accepting.value, [item.username]: true }
+  const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '拒绝好友申请失败，请稍后重试。'
+  try {
+    let operation = action === 'accept'
+      ? await wechatApi.acceptFriendRequest(props.account.id, item.username)
+      : await wechatApi.declineFriendRequest(props.account.id, item.username)
+    for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+      await sleep(SYNC_POLL_INTERVAL)
+      operation = await wechatApi.getOperation(props.account.id, operation.id)
+    }
+    if (!isTerminalState(operation.state))
+      throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
+    if (operation.state !== 'succeeded')
+      throw new WechatApiError('操作未成功，请稍后重试。', 0)
+    preflightStates.value = { ...preflightStates.value, [item.username]: { loading: false } }
+    detailRequest.value = null
+    await Promise.all([loadContacts(), loadFriendRequests()])
+  }
+  catch (value) {
+    preflightStates.value = {
+      ...preflightStates.value,
+      [item.username]: {
+        loading: false,
+        error: userFacingErrorMessage(value, failing),
+      },
+    }
+  }
+  finally {
+    accepting.value = { ...accepting.value, [item.username]: false }
   }
 }
 
@@ -365,28 +454,33 @@ onBeforeUnmount(() => {
           <span class="friend-requests-count">{{ friendRequests.length }}</span>
         </h3>
         <div v-for="item in friendRequests" :key="item.id" class="request-row">
-          <ThreadAvatar
-            :account-id="account.id"
-            :name="requestName(item)"
-            :username="item.username"
-            :image-url="item.avatar ?? null"
-            :size="40"
-          />
-          <span class="request-main">
-            <span class="request-name">{{ requestName(item) }}</span>
-            <span class="request-sub">{{ item.greeting || '请求添加你为朋友' }}</span>
-            <span v-if="resultLabel(item)" class="request-result" :class="resultClass(item)">
-              {{ resultLabel(item) }}
-            </span>
-          </span>
           <button
             type="button"
-            class="request-check"
-            :disabled="stateOf(item)?.loading"
-            @click="checkRequest(item)"
+            class="request-open"
+            title="查看申请详情"
+            @click="openDetail(item)"
           >
-            {{ stateOf(item)?.loading ? '检查中' : '检查' }}
+            <ThreadAvatar
+              :account-id="account.id"
+              :name="requestName(item)"
+              :username="item.username"
+              :image-url="item.avatar ?? null"
+              :size="40"
+            />
+            <span class="request-main">
+              <span class="request-name">{{ requestName(item) }}</span>
+              <span class="request-sub">{{ item.greeting || '请求添加你为朋友' }}</span>
+            </span>
           </button>
+          <span class="request-actions">
+            <button
+              type="button"
+              class="request-accept"
+              @click="openDetail(item)"
+            >
+              查看
+            </button>
+          </span>
         </div>
       </section>
 
@@ -410,10 +504,7 @@ onBeforeUnmount(() => {
           />
           <span class="contact-main">
             <span class="contact-name">{{ contactName(contact) }}</span>
-            <span class="contact-sub">
-              {{ contact.username || contact.id }}
-              <template v-if="contact.alias && contact.alias !== contact.username"> · {{ contact.alias }}</template>
-            </span>
+            <span v-if="contact.alias" class="contact-sub">{{ contact.alias }}</span>
           </span>
           <span class="contact-action">聊天</span>
         </button>
@@ -444,6 +535,58 @@ onBeforeUnmount(() => {
         用「{{ normalizedQuery }}」开始聊天
       </button>
     </footer>
+
+    <div v-if="detailRequest" class="request-overlay" @click.self="closeDetail">
+      <div class="request-detail" role="dialog" aria-modal="true">
+        <button type="button" class="detail-close" title="关闭" @click="closeDetail">
+          <Icon name="close" :size="14" />
+        </button>
+        <div class="detail-head">
+          <ThreadAvatar
+            :account-id="account.id"
+            :name="requestName(detailRequest)"
+            :username="detailRequest.username"
+            :image-url="detailRequest.avatar ?? null"
+            :size="72"
+          />
+          <div class="detail-id">
+            <span class="detail-name">{{ requestName(detailRequest) }}</span>
+            <span class="detail-source">{{ sceneLabel(detailRequest) }}</span>
+          </div>
+        </div>
+        <div class="detail-body">
+          <div v-if="detailRequest.greeting" class="detail-greeting">
+            <span class="detail-label">申请消息</span>
+            <p>{{ detailRequest.greeting }}</p>
+          </div>
+          <div class="detail-meta">
+            <span class="detail-label">申请时间</span>
+            <span>{{ formatRequestTime(detailRequest.createdAt) }}</span>
+          </div>
+          <div v-if="stateOf(detailRequest)" class="detail-status" :class="resultClass(detailRequest)">
+            {{ resultLabel(detailRequest) }}
+          </div>
+        </div>
+        <div class="detail-actions">
+          <button
+            type="button"
+            class="detail-decline"
+            :disabled="acceptDisabled(detailRequest)"
+            @click="actOnRequest(detailRequest, 'decline')"
+          >
+            {{ accepting[detailRequest.username] ? '处理中' : '拒绝' }}
+          </button>
+          <button
+            type="button"
+            class="request-accept"
+            :disabled="acceptDisabled(detailRequest)"
+            @click="actOnRequest(detailRequest, 'accept')"
+          >
+            {{ accepting[detailRequest.username] ? '处理中' : '同意' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -709,38 +852,217 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.request-result {
-  font-size: 10.5px;
-  line-height: 1.4;
+.request-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 10px;
 }
 
-.request-result.ready {
-  color: var(--accent-strong, var(--accent));
+.request-open:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
-.request-result.blocked {
-  color: var(--muted-soft);
+.request-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.request-check {
+.request-accept {
   flex: 0 0 auto;
   align-self: center;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
   font-size: 11px;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  font-weight: 500;
+  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
-.request-check:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+.request-accept:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.request-accept:disabled {
+  opacity: 0.5;
+}
+
+.request-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 45%);
+  backdrop-filter: blur(6px);
+}
+
+.request-detail {
+  position: relative;
+  width: 320px;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px);
+  animation: detail-in 0.18s ease;
+}
+
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.detail-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel-hover);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.detail-close:hover {
   color: var(--text);
 }
 
-.request-check:disabled {
-  opacity: 0.55;
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 28px;
+}
+
+.detail-id {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-source {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.detail-greeting {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-hover);
+}
+
+.detail-greeting p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  word-break: break-word;
+}
+
+.detail-label {
+  display: block;
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.detail-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.detail-meta .detail-label {
+  flex: 0 0 auto;
+}
+
+.detail-status {
+  font-size: 12px;
+}
+
+.detail-status.ready {
+  color: var(--text-soft);
+}
+
+.detail-status.blocked {
+  color: var(--muted-soft);
+}
+
+.detail-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.detail-actions button {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.detail-decline {
+  border: 1px solid rgba(229, 72, 77, 0.55);
+  background: transparent;
+  color: #e5484d;
+}
+
+.detail-decline:hover:not(:disabled) {
+  background: rgba(229, 72, 77, 0.14);
+  border-color: rgba(229, 72, 77, 0.75);
+}
+
+.detail-actions .request-accept {
+  padding: 9px 0;
+  border-radius: 12px;
+  font-size: 13px;
 }
 
 .contacts-skeletons {

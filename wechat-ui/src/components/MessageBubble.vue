@@ -476,7 +476,7 @@ const imageStateLabel = computed(() => {
   return mediaStateLabel.value || '图片暂不可用'
 })
 
-// 好友验证消息（type 37）：展示申请人、附言，并提示到手机微信处理。
+// 好友验证消息（type 37）：展示申请人、附言，待处理时可在卡片上直接同意。
 const friendRequestCard = computed(() => props.message.friendRequest ?? null)
 
 const friendRequestName = computed(() => {
@@ -486,13 +486,47 @@ const friendRequestName = computed(() => {
   return request.fromNickname?.trim() || request.fromUsername?.trim() || ''
 })
 
-// 头像加载失败时回退到昵称首字母占位。
-const friendRequestAvatarBroken = ref(false)
+// 卡片操作状态：服务端 status 为准，本卡片同意/拒绝成功后立即切换，避免整表刷新。
+const friendRequestStatus = computed(() => friendRequestCard.value?.status ?? 'pending')
+const friendRequestLocalStatus = ref<'pending' | 'accepted' | 'declined' | null>(null)
+const friendRequestEffectiveStatus = computed(() =>
+  friendRequestLocalStatus.value ?? friendRequestStatus.value)
+const friendRequestProcessing = ref(false)
+const friendRequestError = ref('')
 
-const friendRequestInitial = computed(() => {
-  const name = friendRequestName.value || '?'
-  return Array.from(name)[0]?.toUpperCase() ?? '?'
-})
+async function actOnCard(action: 'accept' | 'decline'): Promise<void> {
+  const request = friendRequestCard.value
+  if (!request?.fromUsername?.trim() || friendRequestProcessing.value)
+    return
+  friendRequestProcessing.value = true
+  friendRequestError.value = ''
+  const failing = action === 'accept'
+    ? '未成功，请稍后在通讯录里重试。'
+    : '拒绝失败，请稍后重试。'
+  try {
+    let operation = action === 'accept'
+      ? await wechatApi.acceptFriendRequest(props.account.id, request.fromUsername)
+      : await wechatApi.declineFriendRequest(props.account.id, request.fromUsername)
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (['succeeded', 'failed', 'cancelled', 'expired'].includes(operation.state))
+        break
+      await new Promise(resolve => window.setTimeout(resolve, 1000))
+      operation = await wechatApi.getOperation(props.account.id, operation.id)
+    }
+    if (operation.state === 'succeeded')
+      friendRequestLocalStatus.value = action === 'accept' ? 'accepted' : 'declined'
+    else
+      friendRequestError.value = failing
+  }
+  catch {
+    friendRequestError.value = '操作失败，请稍后重试。'
+  }
+  finally {
+    friendRequestProcessing.value = false
+  }
+}
+
+// 头像由 ThreadAvatar 经 hub 头像端点加载，无头像时组件内回退首字母。
 
 const showText = computed(() => {
   if (props.message.localMedia)
@@ -695,15 +729,14 @@ const sendStatus = computed(() => {
         </div>
 
         <div v-if="friendRequestCard" class="friend-request-card">
-          <div class="fr-avatar" :class="{ fallback: !friendRequestCard.avatar || friendRequestAvatarBroken }">
-            <img
-              v-if="friendRequestCard.avatar && !friendRequestAvatarBroken"
-              :src="friendRequestCard.avatar"
-              alt=""
-              referrerpolicy="no-referrer"
-              @error="friendRequestAvatarBroken = true"
-            >
-            <span v-else class="fr-initial">{{ friendRequestInitial }}</span>
+          <div class="fr-avatar">
+            <ThreadAvatar
+              :account-id="account.id"
+              :name="friendRequestName || '新的朋友'"
+              :username="friendRequestCard.fromUsername || friendRequestName || 'new-friend'"
+              :image-url="friendRequestCard.avatar ?? null"
+              :size="42"
+            />
             <span class="fr-badge"><Icon name="plus" :size="10" :stroke-width="2.4" /></span>
           </div>
           <div class="fr-body">
@@ -711,8 +744,35 @@ const sendStatus = computed(() => {
             <span class="fr-greeting">{{ friendRequestCard.greeting?.trim() || '请求添加你为朋友' }}</span>
           </div>
           <div class="fr-foot">
-            <Icon name="contacts" :size="12" />
-            <span>请在手机微信上通过此申请</span>
+            <template v-if="friendRequestEffectiveStatus === 'accepted'">
+              <Icon name="check" :size="12" />
+              <span>已添加</span>
+            </template>
+            <template v-else-if="friendRequestEffectiveStatus === 'declined'">
+              <span>已拒绝</span>
+            </template>
+            <template v-else-if="friendRequestCard.scene == null">
+              <span class="fr-note">缺少来源信息，请在手机上处理</span>
+            </template>
+            <template v-else>
+              <button
+                type="button"
+                class="fr-accept"
+                :disabled="friendRequestProcessing"
+                @click="actOnCard('accept')"
+              >
+                {{ friendRequestProcessing ? '处理中' : '同意' }}
+              </button>
+              <button
+                type="button"
+                class="fr-decline"
+                :disabled="friendRequestProcessing"
+                @click="actOnCard('decline')"
+              >
+                拒绝
+              </button>
+              <span v-if="friendRequestError" class="fr-error">{{ friendRequestError }}</span>
+            </template>
           </div>
         </div>
 
@@ -1274,31 +1334,11 @@ const sendStatus = computed(() => {
 }
 
 .fr-avatar {
-  position: relative;
   grid-column: 1;
   grid-row: 1;
+  position: relative;
   width: 42px;
   height: 42px;
-}
-
-.fr-avatar img {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--panel-soft);
-}
-
-.fr-initial {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
 }
 
 .fr-badge {
@@ -1357,6 +1397,54 @@ const sendStatus = computed(() => {
   font-size: 10.5px;
   line-height: 1.3;
   opacity: 0.82;
+}
+
+.fr-accept {
+  padding: 3px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.fr-accept:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.fr-accept:disabled {
+  opacity: 0.55;
+}
+
+.fr-decline {
+  padding: 3px 14px;
+  border: 1px solid color-mix(in srgb, #e5484d 55%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: #e5484d;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.fr-decline:hover:not(:disabled) {
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+  border-color: #e5484d;
+}
+
+.fr-decline:disabled {
+  opacity: 0.55;
+}
+
+.fr-error {
+  color: #e5484d;
+}
+
+.fr-note {
+  color: var(--muted-soft);
 }
 
 .system-row {

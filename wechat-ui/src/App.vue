@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { newIdempotencyKey, wechatApi, WechatApiError } from './api'
+import { hasHubAuth, newIdempotencyKey, wechatApi, WechatApiError } from './api'
 import { sendFailureMessage, userFacingErrorMessage } from './errors'
 import { consumeEventStream } from './events'
 import {
@@ -2293,6 +2293,11 @@ onBeforeUnmount(() => {
       <span class="boot-logo error"><Icon name="alert" :size="26" /></span>
       <p>{{ bootError }}</p>
       <button class="boot-retry" type="button" @click="bootstrap">重试</button>
+    </div>
+
+    <div v-else-if="!hasHubAuth()" class="boot-screen">
+      <span class="boot-logo error"><Icon name="alert" :size="26" /></span>
+      <p>缺少访问凭据：请使用 Hub 启动日志里的一键链接打开本页面。</p>
     </div>
 
     <LoginPanel

@@ -316,8 +316,8 @@ defineExpose({ focusSearch })
 .filter-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 12px 10px;
+  gap: 3px;
+  padding: 0 10px 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -328,12 +328,12 @@ defineExpose({ focusSearch })
 
 .filter-tab {
   flex: 0 0 auto;
-  padding: 4px 9px;
+  padding: 4px 5px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;

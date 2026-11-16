@@ -39,6 +39,9 @@ export function previewText(thread: Thread): string {
   const message = thread.lastMessage
   if (!message)
     return '暂无消息'
+  // 好友申请卡片消息原文为不可读的英文兜底，统一显示可读文案。
+  if (message.type === 37)
+    return '[好友申请]'
   if (message.text?.trim())
     return message.text.trim()
   return messageTypeLabel(message.type, undefined)
@@ -58,6 +61,8 @@ export function messageTypeLabel(type: number, appMessageType?: number): string 
       return '[表情]'
     case 48:
       return '[位置]'
+    case 37:
+      return '[好友申请]'
     case 49:
       switch (appMessageType) {
         case 5:

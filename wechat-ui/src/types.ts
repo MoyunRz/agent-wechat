@@ -219,6 +219,7 @@ export type FriendRequest = {
   encryptUsername: string | null
   scene: number | null
   greeting: string | null
+  status?: 'pending' | 'accepted' | 'declined' | null
   avatar?: string | null
 }
 
@@ -230,6 +231,9 @@ export type PendingFriendRequest = {
   alias: string | null
   greeting: string | null
   avatar?: string | null
+  hasScene?: boolean
+  scene?: number | null
+  createdAt?: string | null
 }
 
 /** 定向联系人查询（服务端 getcontact）返回的单条结果。 */
@@ -260,6 +264,7 @@ export type FriendRequestPreflight = {
   hasV3?: boolean
   hasV4?: boolean
   needsTicketRefresh?: boolean
+  gateOpen?: boolean
   blocking: string[]
 }
 

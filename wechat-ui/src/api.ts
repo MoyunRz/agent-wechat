@@ -63,6 +63,11 @@ function hubAuthToken(): string {
   }
 }
 
+/** Whether the hub token is available (same-origin standalone mode). */
+export function hasHubAuth(): boolean {
+  return hubAuthToken().trim() !== ''
+}
+
 function resolveClientBase(): string {
   const configured = (import.meta.env.VITE_WECHAT_CLIENT_BASE ?? '').trim()
   if (configured)
@@ -322,6 +327,26 @@ export const wechatApi = {
   async preflightFriendRequest(accountId: string, username: string): Promise<FriendRequestPreflight> {
     return request<FriendRequestPreflight>(
       `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/preflight`,
+    )
+  },
+
+  /** 通过一位申请人的最新好友申请；申请材料由 hub 从落库消息中读取，前端不经手。 */
+  acceptFriendRequest(accountId: string, username: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/accept`,
+      'POST',
+      {},
+      { 'Idempotency-Key': idempotencyKey('friend-accept') },
+    )
+  },
+
+  /** 拒绝一位申请人的最新好友申请；申请材料由 hub 从落库消息中读取，前端不经手。 */
+  declineFriendRequest(accountId: string, username: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/decline`,
+      'POST',
+      {},
+      { 'Idempotency-Key': idempotencyKey('friend-decline') },
     )
   },
 
