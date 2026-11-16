@@ -18,6 +18,7 @@ mod events;
 mod login;
 mod outcome;
 mod output;
+mod parent_watch;
 mod profile_cli;
 mod profile_export;
 mod settings;
@@ -1186,7 +1187,7 @@ async fn main() {
     }
     std::process::exit(outcome::exit());
 }
-async fn shutdown(core: Arc<Core>, parent: Option<wechat_platform::ParentWatch>) {
+async fn shutdown(core: Arc<Core>, parent: Option<parent_watch::ParentWatch>) {
     async fn requested(core: &Core) {
         while !core.stopping.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1194,7 +1195,7 @@ async fn shutdown(core: Arc<Core>, parent: Option<wechat_platform::ParentWatch>)
     }
     // A parent that exits during startup is noticed once the daemon is ready,
     // because the watch keeps reporting the exit.
-    async fn orphaned(parent: Option<wechat_platform::ParentWatch>) {
+    async fn orphaned(parent: Option<parent_watch::ParentWatch>) {
         let Some(parent) = parent else {
             return std::future::pending().await;
         };
@@ -1411,7 +1412,7 @@ async fn run(cli: Cli) -> Result<()> {
     let parent = match &cli.command {
         Command::Serve {
             exit_with_parent: true,
-        } => Some(wechat_platform::ParentWatch::new().context("cannot watch the parent process")?),
+        } => Some(parent_watch::ParentWatch::new().context("cannot watch the parent process")?),
         _ => None,
     };
     let output = Output::new(cli.json);
@@ -2352,7 +2353,7 @@ async fn serve(
     config: wechat_config::ServerConfig,
     token_stdin: bool,
     json: bool,
-    parent: Option<wechat_platform::ParentWatch>,
+    parent: Option<parent_watch::ParentWatch>,
 ) -> Result<()> {
     let supplied = if token_stdin {
         if config.token_explicit {
