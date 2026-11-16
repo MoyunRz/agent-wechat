@@ -142,8 +142,9 @@ export function dayLabel(value: string | null | undefined): string {
   })
 }
 
-export function connectionTone(connection: string, authenticated: boolean): 'online' | 'pending' | 'offline' {
-  const normalized = connection.trim().toLowerCase()
+export function connectionTone(connection: string | undefined, authenticated: boolean): 'online' | 'pending' | 'offline' {
+  // 账号创建等响应可能省略 connection 字段，按未连接处理而不是崩溃。
+  const normalized = (connection ?? 'disconnected').trim().toLowerCase()
   if (authenticated && (normalized === 'connected' || normalized === 'online'))
     return 'online'
   if (normalized === 'connecting' || normalized === 'reconnecting')
@@ -151,7 +152,7 @@ export function connectionTone(connection: string, authenticated: boolean): 'onl
   return 'offline'
 }
 
-export function connectionLabel(connection: string, authenticated: boolean): string {
+export function connectionLabel(connection: string | undefined, authenticated: boolean): string {
   const tone = connectionTone(connection, authenticated)
   if (tone === 'online')
     return '已连接'
