@@ -55,6 +55,7 @@ mod recalls;
 mod schema;
 mod snapshot;
 mod thread_read;
+mod wal_conversion;
 mod writer;
 
 pub use dat::*;
@@ -73,6 +74,7 @@ pub use recalls::*;
 pub use schema::*;
 pub use snapshot::{keys_from_agent_cache, keys_from_password, ProfileLocation, ReadOptions};
 pub use thread_read::*;
+pub use wal_conversion::*;
 pub use writer::*;
 
 #[derive(Debug, thiserror::Error)]
