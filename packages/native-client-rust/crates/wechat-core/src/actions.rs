@@ -89,7 +89,14 @@ impl Core {
                             {
                                 json!({"code":"openim_contact_failed","serviceCode":failure.service_code})
                             } else {
-                                json!({"code":code})
+                                // Keep the short root-cause text for diagnosis; the
+                                // protocol layer never embeds request material in errors.
+                                let text = error.to_string();
+                                let mut end = text.len().min(500);
+                                while end > 0 && !text.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                json!({"code":code, "error": &text[..end]})
                             };
                             let _ = core.progress(&worker, "failed", result);
                         }

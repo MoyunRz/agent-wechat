@@ -344,7 +344,18 @@ impl AuthenticatedPacket {
     /// Call only on the plaintext returned by the authenticated MMTLS transport.
     pub fn decode_verified_transport_reply(&self, input: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let envelope = split(input)?;
-        ServiceRejected::check(Service::NativeEnvelope, envelope.return_code)?;
+        if let Err(rejection) = ServiceRejected::check(Service::NativeEnvelope, envelope.return_code)
+        {
+            // The envelope rejected the request before any business decoding.
+            // Best-effort decrypt the payload to surface the service's own
+            // detail message; failure here keeps the plain rejection.
+            if let Some(detail) = self.rejection_detail(&envelope) {
+                // Keep the typed rejection on the chain and carry both texts.
+                let text = rejection.to_string();
+                return Err(rejection.context(format!("{text}; {detail}")));
+            }
+            return Err(rejection);
+        }
         ensure!(
             envelope.cgi == self.cgi as u64
                 && envelope.encryption == self.mode
@@ -370,6 +381,69 @@ impl AuthenticatedPacket {
             "Authenticated plaintext length mismatch"
         );
         Ok((plain, envelope.cookie))
+    }
+
+    /// Best-effort service detail for a rejected envelope: decrypt the payload
+    /// and read the business response's BaseResponse (field 1) errmsg
+    /// (field 2). Any structural surprise yields None instead of an error.
+    fn rejection_detail(&self, envelope: &Envelope) -> Option<String> {
+        let mut notes = Vec::new();
+        let head = envelope
+            .payload
+            .iter()
+            .take(64)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        notes.push(format!(
+            "reply-cgi={} encryption={} compression={} payload={}B head={head}",
+            envelope.cgi,
+            envelope.encryption,
+            envelope.compression,
+            envelope.payload.len()
+        ));
+        let decrypted = if self.mode == 13 {
+            envelope_open(&envelope.payload, &self.key, b"").ok()
+        } else {
+            cbc(&envelope.payload, &self.key, Mode::Decrypt).ok()
+        };
+        let Some(body) = decrypted else {
+            notes.push("decrypt-failed".into());
+            return Some(notes.join(", "));
+        };
+        let plain = if envelope.compression == 1 {
+            match inflate(&body) {
+                Ok(plain) => plain,
+                Err(_) => {
+                    notes.push("inflate-failed".into());
+                    return Some(notes.join(", "));
+                }
+            }
+        } else {
+            body
+        };
+        let Ok(fields) = p::decode(&plain) else {
+            notes.push(format!("decode-failed plain={}B", plain.len()));
+            return Some(notes.join(", "));
+        };
+        notes.push(format!("top-fields={}", fields.len()));
+        let Ok(base) = p::data(&fields, 1) else {
+            return Some(notes.join(", "));
+        };
+        let Ok(base_fields) = p::decode(base) else {
+            notes.push("base-decode-failed".into());
+            return Some(notes.join(", "));
+        };
+        let Ok(message) = p::optional_data(&base_fields, 2) else {
+            return Some(notes.join(", "));
+        };
+        if let Some(message) = message {
+            if let Ok(text) = String::from_utf8(message.to_vec()) {
+                if !text.trim().is_empty() {
+                    notes.push(format!("service message: {text}"));
+                }
+            }
+        }
+        (!notes.is_empty()).then(|| notes.join(", "))
     }
 }
 pub fn account_keys(inner: &Ecdh, auth: &[u8]) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {

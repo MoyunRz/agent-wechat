@@ -73,12 +73,28 @@ pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u3
         p::bytes(1, input.encrypt_username.as_bytes()),
         p::bytes(2, input.ticket.as_bytes()),
     ])?;
-    p::message(&[
+    // Grey-scale probe: WX_VERIFY_PROBE switches request shapes while hunting
+    // the envelope -2 rejection. Modes: no-payload (frame fields only),
+    // op1/op2 (override opcode), field4 (pair into field 4 instead of 9).
+    let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
+    let opcode = match probe.as_str() {
+        "op1" => 1,
+        "op2" => 2,
+        _ => opcode,
+    };
+    let mut fields = vec![
         p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?),
         p::uint(2, u64::from(opcode)),
         p::uint(3, u64::from(input.scene)),
-        p::bytes(9, &entry),
-    ])
+    ];
+    if probe != "no-payload" {
+        if probe == "field4" {
+            fields.push(p::bytes(4, &entry));
+        } else {
+            fields.push(p::bytes(9, &entry));
+        }
+    }
+    p::message(&fields)
 }
 
 /// Encode one contact-request acceptance with the account's BaseRequest.

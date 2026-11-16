@@ -285,6 +285,13 @@ impl Core {
                         }))
                     }
                     Err(error) => {
+                        // The signed outcome is unknown after a failed submission;
+                        // keep the short root-cause text for diagnosis.
+                        let text = error.to_string();
+                        let mut end = text.len().min(500);
+                        while end > 0 && !text.is_char_boundary(end) {
+                            end -= 1;
+                        }
                         core.store.append_event(
                             &account,
                             action.failed_event_name(),
@@ -295,6 +302,7 @@ impl Core {
                                 "ticketLength": ticket.len(),
                                 "materialHash": material,
                                 "outcome": "unknown",
+                                "error": &text[..end],
                             }),
                         )?;
                         Err(error)
