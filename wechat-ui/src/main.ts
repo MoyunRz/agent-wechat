@@ -1,6 +1,10 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import { initHubAuth } from './api'
 import './styles.css'
+
+// 独立托管模式（hub /ui/）下把 ?auth= 令牌移入 sessionStorage 并清理地址栏。
+initHubAuth()
 
 const UI_SETTINGS_KEY = 'vane.wechat.ui-settings'
 try {

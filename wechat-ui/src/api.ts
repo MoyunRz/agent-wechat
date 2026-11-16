@@ -30,6 +30,37 @@ export class WechatApiError extends Error {
   }
 }
 
+const HUB_AUTH_STORAGE_KEY = 'wechat.hub-auth'
+
+/**
+ * Standalone mode: the UI is served by the hub itself (`/ui/`) and carries its
+ * API token via the `?auth=` query parameter. The token is moved into session
+ * storage and stripped from the address bar on first load.
+ */
+export function initHubAuth(): void {
+  try {
+    const url = new URL(window.location.href)
+    const fromQuery = url.searchParams.get('auth')
+    if (fromQuery) {
+      sessionStorage.setItem(HUB_AUTH_STORAGE_KEY, fromQuery)
+      url.searchParams.delete('auth')
+      window.history.replaceState(null, '', url)
+    }
+  }
+  catch {
+    // 非 https/file 环境或 storage 不可用时按无 token 处理。
+  }
+}
+
+function hubAuthToken(): string {
+  try {
+    return sessionStorage.getItem(HUB_AUTH_STORAGE_KEY) ?? ''
+  }
+  catch {
+    return ''
+  }
+}
+
 function resolveClientBase(): string {
   const configured = (import.meta.env.VITE_WECHAT_CLIENT_BASE ?? '').trim()
   if (configured)
@@ -45,10 +76,20 @@ function resolveClientBase(): string {
   if (trimmed.endsWith('/client/ui'))
     return `${trimmed.slice(0, -'/client/ui'.length)}/client/v1`
 
+  // Served by the hub under /ui: same-origin API with the token header.
+  if (trimmed === '/ui' || trimmed.endsWith('/ui') || hubAuthToken())
+    return '/v1'
+
   return '/client/v1'
 }
 
 const CLIENT_BASE = resolveClientBase()
+
+/** The standalone hub token, when the UI runs in same-origin mode. */
+export function authHeaders(): Record<string, string> {
+  const token = hubAuthToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 function apiUrl(path: string): string {
   const normalized = path.startsWith('/') ? path : `/${path}`
@@ -110,11 +151,13 @@ async function readError(response: Response): Promise<WechatApiError> {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
+  const { headers: extraHeaders, ...rest } = init
   try {
     response = await fetch(apiUrl(path), {
       cache: 'no-store',
       credentials: 'same-origin',
-      ...init,
+      ...rest,
+      headers: { ...authHeaders(), ...(extraHeaders ?? {}) },
     })
   }
   catch {

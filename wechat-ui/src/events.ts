@@ -1,4 +1,4 @@
-import { wechatApi } from './api'
+import { authHeaders, wechatApi } from './api'
 import type { WechatEvent } from './types'
 
 type EventStreamOptions = {
@@ -80,7 +80,7 @@ export async function consumeEventStream(options: EventStreamOptions): Promise<v
   const response = await fetch(url, {
     cache: 'no-store',
     credentials: 'same-origin',
-    headers: { Accept: 'text/event-stream' },
+    headers: { Accept: 'text/event-stream', ...authHeaders() },
     signal: options.signal,
   })
   if (!response.ok)

@@ -21,6 +21,7 @@ mod output;
 mod profile_cli;
 mod profile_export;
 mod settings;
+mod ui_static;
 use outcome::{failure, set_exit};
 use output::Output;
 
@@ -2284,6 +2285,16 @@ async fn serve(config: wechat_config::ServerConfig, token_stdin: bool, json: boo
         eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id);
     }
     let router = wechat_api::router(core.clone(), &token);
+    // Host the bundled chat UI outside the authenticated API surface when
+    // WX_UI_DIR points at a built bundle (see wechat-ui/README.md).
+    let router = match std::env::var("WX_UI_DIR")
+        .ok()
+        .map(|dir| dir.trim().to_owned())
+        .filter(|dir| !dir.is_empty())
+    {
+        Some(dir) => ui_static::ui_routes(std::path::PathBuf::from(dir)).fallback_service(router),
+        None => router,
+    };
     let local =
         axum::serve(listener, router.clone()).with_graceful_shutdown(shutdown(core.clone()));
     if let Some((socket, tls)) = network {
