@@ -2245,6 +2245,27 @@ async fn stdin_token() -> Result<String> {
     }
     Ok(token.into())
 }
+/// Chat UI bundle location: an explicit `WX_UI_DIR` wins; otherwise look for a
+/// `wechat-ui` bundle next to the executable or `<data_dir>/ui`, requiring an
+/// `index.html` so auto-discovery never points at an empty directory.
+fn resolve_ui_dir(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var("WX_UI_DIR")
+        .ok()
+        .map(|dir| dir.trim().to_owned())
+        .filter(|dir| !dir.is_empty())
+    {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    let exe_side = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("wechat-ui")));
+    let data_side = Some(data_dir.join("ui"));
+    [exe_side, data_side]
+        .into_iter()
+        .flatten()
+        .find(|dir| dir.join("index.html").is_file())
+}
+
 async fn serve(config: wechat_config::ServerConfig, token_stdin: bool, json: bool) -> Result<()> {
     let supplied = if token_stdin {
         if config.token_explicit {
@@ -2276,25 +2297,34 @@ async fn serve(config: wechat_config::ServerConfig, token_stdin: bool, json: boo
     };
     core.start_workers()?;
     let listen = listener.local_addr()?;
-    if json {
-        eprintln!(
-            "{}",
-            json!({"state":"ready","listen":listen.to_string(),"serverId":store.server_id,"nativeLogin":true})
-        );
-    } else {
-        eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id);
-    }
     let router = wechat_api::router(core.clone(), &token);
-    // Host the bundled chat UI outside the authenticated API surface when
-    // WX_UI_DIR points at a built bundle (see wechat-ui/README.md).
-    let router = match std::env::var("WX_UI_DIR")
-        .ok()
-        .map(|dir| dir.trim().to_owned())
-        .filter(|dir| !dir.is_empty())
-    {
-        Some(dir) => ui_static::ui_routes(std::path::PathBuf::from(dir)).fallback_service(router),
+    // Host the bundled chat UI outside the authenticated API surface. The
+    // directory comes from WX_UI_DIR when set, otherwise we auto-discover a
+    // `wechat-ui` bundle next to the executable or `<data_dir>/ui` so the
+    // daemon + UI can run without any wrapper tooling.
+    let ui_dir = resolve_ui_dir(&config.data_dir);
+    let router = match &ui_dir {
+        Some(dir) => ui_static::ui_routes(dir.clone()).fallback_service(router),
         None => router,
     };
+    match &ui_dir {
+        Some(dir) if json => eprintln!(
+            "{}",
+            json!({"state":"ready","listen":listen.to_string(),"serverId":store.server_id,"nativeLogin":true,"ui":dir.display().to_string()})
+        ),
+        Some(dir) => {
+            eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id);
+            eprintln!(
+                "Chat UI: http://{listen}/ui/?auth={token} (bundle: {})",
+                dir.display()
+            );
+        }
+        None if json => eprintln!(
+            "{}",
+            json!({"state":"ready","listen":listen.to_string(),"serverId":store.server_id,"nativeLogin":true})
+        ),
+        None => eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id),
+    }
     let local =
         axum::serve(listener, router.clone()).with_graceful_shutdown(shutdown(core.clone()));
     if let Some((socket, tls)) = network {

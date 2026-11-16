@@ -4,6 +4,30 @@ Standalone Vue 3 chat UI for WeChat accounts served by the native hub. It is a
 self-contained npm project (own lockfile, not part of the pnpm workspace) with
 a single runtime dependency on `vue`.
 
+## Run standalone with the daemon (no wrapper tooling needed)
+
+```bash
+# 1. build the UI bundle
+npm ci && npm run build
+
+# 2. place the bundle where the daemon finds it: either
+#    - a `wechat-ui/` directory next to the wx binary, or
+#    - `<data_dir>/ui`, or
+#    - anywhere, exported as WX_UI_DIR
+# 3. start the daemon
+wx serve
+```
+
+The daemon hosts the bundle at `/ui/` and logs a one-click URL with the API
+token attached:
+
+```
+Chat UI: http://127.0.0.1:6174/ui/?auth=<token> (bundle: ...)
+```
+
+Open that URL in a browser, scan the QR code to log in a WeChat account, and
+the full chat UI runs against the hub directly — no vane-core, no vane-console.
+
 ## Run standalone (dev server against a running hub)
 
 ```bash
