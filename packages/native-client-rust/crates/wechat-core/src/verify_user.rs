@@ -196,6 +196,7 @@ impl Core {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)] // One verify-user request's peers, credentials and action.
     async fn submit_contact_request(
         self: &Arc<Self>,
         account: &str,
