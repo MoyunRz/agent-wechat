@@ -6,6 +6,7 @@ import { toInboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import { normalizeWeChatCommandBody, resolveWeChatIngress, resolveWeChatPolicyContext } from "./access-control.ts";
 import { ensureNativeHost } from "./native-host.ts";
 import { NativeConsumerState } from "./native-consumer-state.ts";
+import { NativeReplyGates } from "./native-reply-gates.ts";
 import { invalidateNativePreparedInputs, nativeDispatchManifest, nativeSourceMessageSid, trackNativePreparedInput } from "./native-prepared-boundary.ts";
 import { nativeRecallInfo, type NativeRecallObservation } from "./native-recall-state.ts";
 import { submitNativeText } from "./native-send.ts";
@@ -52,7 +53,7 @@ export async function projectNativeRead(client: NativeWeChatClient, accountId: s
 }
 type NativeDispatchParams = {
   client: NativeWeChatClient; state: NativeConsumerState; account: ResolvedWeChatAccount;
-  message: NativeMessage; cfg: any; core: any;
+  message: NativeMessage; cfg: any; core: any; gates?: NativeReplyGates;
   createPipeline?: typeof createChannelMessageReplyPipeline;
   prepareAttachment?: typeof prepareNativeAttachment;
   onDelivered?: () => void;
@@ -117,6 +118,7 @@ export async function dispatchNativeMessage(params: NativeDispatchParams): Promi
 }
 async function dispatchNativeMessageInput(params: NativeDispatchParams, revision?: string): Promise<"ignored" | "completed" | "needs_review" | "pending"> {
   const { client, state, account, message, cfg, core } = params;
+  const gates = params.gates;
   const readPolicy = account.native?.readPolicy ?? "on_inbound";
   const custody = state.get(message.id);
   if (state.isRecalled(message)) return "ignored";
@@ -134,6 +136,15 @@ async function dispatchNativeMessageInput(params: NativeDispatchParams, revision
   const allowTextCommands = core.channel.commands.shouldHandleTextCommands({ cfg, surface: "agent-wechat" });
   const commandBody = normalizeWeChatCommandBody(message.type === 1 ? message.body ?? "" : "", { isGroup, wasMentioned });
   const hasControlCommand = allowTextCommands && core.channel.commands.isControlCommandMessage(commandBody, cfg);
+  // Risk-control valves: a burst of messages dispatches once, replies keep a
+  // spacing window, and an uncertain outcome pauses the account for an hour.
+  if (gates && !hasControlCommand) {
+    gates.markSeen(message.id);
+    const newestSeen = Math.max(...state.items()
+      .filter(value => value.state === "received" && value.message.threadId === message.threadId)
+      .map(value => gates.seenAtOf(value.message.id)));
+    if (gates.deferReply(message.threadId, newestSeen)) return "pending";
+  }
   const resolve = core.channel.inbound?.ingress?.resolveStable ?? resolveStableChannelMessageIngress;
   const senderAdmission = (senderId: string) => resolveWeChatIngress({ resolve, cfg, accountId: account.accountId,
     policy, isGroup, chatId: message.threadId, senderId,
@@ -168,6 +179,22 @@ async function dispatchNativeMessageInput(params: NativeDispatchParams, revision
   for (const item of buffered) {
     // A sender removed since intake must not return through history/media.
     if (item.message.senderId && (await senderAdmission(item.message.senderId)).ingress.admission === "dispatch") admitted.push(item.message);
+  }
+  // Debounce aggregation: the earlier messages of the same burst join this
+  // turn as history, so one quiet window answers once.
+  const batchIds: string[] = [];
+  if (gates) {
+    const burst = state.items()
+      .filter(value => value.state === "received" && value.origin === "live" && value.message.direction === "incoming"
+        && value.message.threadId === message.threadId && value.message.id !== message.id)
+      .sort((a, b) => BigInt(a.cursor ?? "0") < BigInt(b.cursor ?? "0") ? -1 : 1)
+      .slice(-nativeGroupHistoryLimit(cfg));
+    for (const item of burst) {
+      if (item.message.senderId && (await senderAdmission(item.message.senderId)).ingress.admission === "dispatch") {
+        admitted.push(item.message);
+        batchIds.push(item.message.id);
+      }
+    }
   }
   const history = await prepareNativeHistory(admitted, async historical => transcribeNativeAttachment(
     await (params.prepareAttachment ?? prepareNativeAttachment)({ client, account, message: historical, core, cfg, allowQuotedMessage,
@@ -250,6 +277,9 @@ async function dispatchNativeMessageInput(params: NativeDispatchParams, revision
       ? true : state.get(message.id)?.readPending;
     state.update(message.id, { state: failed ? "needs_review" : "completed", readPending,
       handoffUnconfirmed: readPolicy === "on_model_dispatch" && !state.get(message.id)?.runId }, revision);
+    // The burst was consumed as this turn's history; a failed turn keeps it
+    // in received custody so the whole burst retries together.
+    if (!failed) for (const id of batchIds) state.update(id, { state: "ignored" });
     return failed ? "needs_review" : "completed";
   } catch {
     if (state.isRecalled(message)) return "ignored";
@@ -287,6 +317,7 @@ export async function startNativeMonitor(opts: WeChatMonitorOptions): Promise<vo
   if (typeof status.serverId !== "string") throw new Error("Native daemon identity is missing");
   const state = new NativeConsumerState(native.consumerStateDir, status.serverId, native.accountId);
   const core = getWeChatRuntime();
+  const gates = new NativeReplyGates();
   let backoff = 250;
   let readTask: Promise<void> | undefined;
   const flushRead = () => {
@@ -315,8 +346,16 @@ export async function startNativeMonitor(opts: WeChatMonitorOptions): Promise<vo
       void error;
     }
     for (const item of state.items().filter(value => value.state === "received")) {
-      await dispatchNativeMessage({ client: host.client, state, account: effective, message: item.message, cfg, core,
-        signal: opts.abortSignal, onDelivered: () => opts.setStatus({ accountId: account.accountId, lastOutboundAt: Date.now() }) });
+      let replied = false;
+      const result = await dispatchNativeMessage({ client: host.client, state, account: effective, message: item.message, cfg, core, gates,
+        signal: opts.abortSignal,
+        onDelivered: () => {
+          if (!replied) { replied = true; gates.recordReply(item.message.threadId); }
+          opts.setStatus({ accountId: account.accountId, lastOutboundAt: Date.now() });
+        } });
+      // One uncertain outcome pauses every automatic reply for an hour; the
+      // daemon's own send circuit enforces the same window on submissions.
+      if (result === "needs_review") gates.tripCircuit();
     }
     try { await flushRead(); }
     catch { opts.log?.error?.("Native read projection is pending; thread read receipt retained for retry"); }
