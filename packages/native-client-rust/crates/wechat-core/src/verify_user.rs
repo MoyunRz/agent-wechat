@@ -155,6 +155,7 @@ impl Core {
     pub async fn accept_contact_request(
         self: &Arc<Self>,
         account: &str,
+        username: &str,
         encrypt_username: &str,
         ticket: &str,
         scene: u32,
@@ -162,6 +163,7 @@ impl Core {
     ) -> Result<Operation> {
         self.submit_contact_request(
             account,
+            username,
             encrypt_username,
             ticket,
             scene,
@@ -176,6 +178,7 @@ impl Core {
     pub async fn decline_contact_request(
         self: &Arc<Self>,
         account: &str,
+        username: &str,
         encrypt_username: &str,
         ticket: &str,
         scene: u32,
@@ -183,6 +186,7 @@ impl Core {
     ) -> Result<Operation> {
         self.submit_contact_request(
             account,
+            username,
             encrypt_username,
             ticket,
             scene,
@@ -195,6 +199,7 @@ impl Core {
     async fn submit_contact_request(
         self: &Arc<Self>,
         account: &str,
+        username: &str,
         encrypt_username: &str,
         ticket: &str,
         scene: u32,
@@ -212,104 +217,102 @@ impl Core {
         ensure!(self.gate_open(account)?, "contact_accept_gate_closed");
         self.rate_limit_check(account)?;
         let core = self.clone();
-        let username = encrypt_username.to_owned();
+        let username = username.to_owned();
+        let encrypt_username = encrypt_username.to_owned();
         let ticket = ticket.to_owned();
         let worker_key = key.to_owned();
         let operation_kind = action.operation_kind();
-        core.start_operation(
-            account,
-            operation_kind,
-            move |core, account| async move {
-                let guard = core.lock_account(&account).await?;
-                let material = request_material_hash(&username, &ticket, scene)?;
-                let replay_key = format!("verify-user-attempt:{material}");
-                if let Some(recorded) = core.store.runtime(&account, &replay_key)? {
-                    let recorded: Value = serde_json::from_slice(&recorded)?;
-                    return Ok(recorded["result"].clone());
-                }
-                ensure!(core.gate_open(&account)?, "contact_accept_gate_closed");
-                core.rate_limit_check(&account)?;
-                let input = VerifyUserAcceptRequest {
-                    encrypt_username: username.clone(),
-                    ticket: ticket.clone(),
-                    scene,
-                };
-                let mut state = core.account_state(&account)?;
-                let key_hash = hash(&worker_key)?;
-                let rpc_core = core.clone();
-                let rpc_account = account.clone();
-                let action_for_rpc = action;
-                let outcome = blocking(move || {
-                    let _guard = guard;
-                    rpc_core.native_request(&rpc_account, &mut state, |request| match action_for_rpc {
-                        ContactRequestAction::Accept => request.verify_user_accept(&input),
-                        ContactRequestAction::Decline => request.verify_user_decline(&input),
-                    })
+        core.start_operation(account, operation_kind, move |core, account| async move {
+            let guard = core.lock_account(&account).await?;
+            let material = request_material_hash(&encrypt_username, &ticket, scene)?;
+            let replay_key = format!("verify-user-attempt:{material}");
+            if let Some(recorded) = core.store.runtime(&account, &replay_key)? {
+                let recorded: Value = serde_json::from_slice(&recorded)?;
+                return Ok(recorded["result"].clone());
+            }
+            ensure!(core.gate_open(&account)?, "contact_accept_gate_closed");
+            core.rate_limit_check(&account)?;
+            let input = VerifyUserAcceptRequest {
+                encrypt_username: encrypt_username.clone(),
+                ticket: ticket.clone(),
+                scene,
+                username: username.clone(),
+            };
+            let mut state = core.account_state(&account)?;
+            let key_hash = hash(&worker_key)?;
+            let rpc_core = core.clone();
+            let rpc_account = account.clone();
+            let action_for_rpc = action;
+            let outcome = blocking(move || {
+                let _guard = guard;
+                rpc_core.native_request(&rpc_account, &mut state, |request| match action_for_rpc {
+                    ContactRequestAction::Accept => request.verify_user_accept(&input),
+                    ContactRequestAction::Decline => request.verify_user_decline(&input),
                 })
-                .await;
-                match outcome {
-                    Ok(reply) => {
-                        core.record_submission(&account)?;
-                        let attempt_record = serde_json::to_vec(&json!({
-                            "result": {
-                                "serviceCode": reply.service_code,
-                                "accepted": reply.accepted(),
-                                "message": reply.message,
-                                "scene": scene,
-                                "action": action.name(),
-                            }
-                        }))?;
-                        core.store.put_runtime(
-                            &account,
-                            &format!("verify-user-attempt:{material}"),
-                            &attempt_record,
-                        )?;
-                        core.store.append_event(
-                            &account,
-                            action.event_name(),
-                            &json!({
-                                "scene": scene,
-                                "action": action.name(),
-                                "serviceCode": reply.service_code,
-                                "accepted": reply.accepted(),
-                                "encryptUsernameLength": username.len(),
-                                "ticketLength": ticket.len(),
-                                "materialHash": material,
-                                "idempotencyKeyHash": key_hash,
-                            }),
-                        )?;
-                        Ok(json!({
+            })
+            .await;
+            match outcome {
+                Ok(reply) => {
+                    core.record_submission(&account)?;
+                    let attempt_record = serde_json::to_vec(&json!({
+                        "result": {
                             "serviceCode": reply.service_code,
                             "accepted": reply.accepted(),
                             "message": reply.message,
-                        }))
-                    }
-                    Err(error) => {
-                        // The signed outcome is unknown after a failed submission;
-                        // keep the short root-cause text for diagnosis.
-                        let text = error.to_string();
-                        let mut end = text.len().min(500);
-                        while end > 0 && !text.is_char_boundary(end) {
-                            end -= 1;
+                            "scene": scene,
+                            "action": action.name(),
                         }
-                        core.store.append_event(
-                            &account,
-                            action.failed_event_name(),
-                            &json!({
-                                "scene": scene,
-                                "action": action.name(),
-                                "encryptUsernameLength": username.len(),
-                                "ticketLength": ticket.len(),
-                                "materialHash": material,
-                                "outcome": "unknown",
-                                "error": &text[..end],
-                            }),
-                        )?;
-                        Err(error)
-                    }
+                    }))?;
+                    core.store.put_runtime(
+                        &account,
+                        &format!("verify-user-attempt:{material}"),
+                        &attempt_record,
+                    )?;
+                    core.store.append_event(
+                        &account,
+                        action.event_name(),
+                        &json!({
+                            "scene": scene,
+                            "action": action.name(),
+                            "serviceCode": reply.service_code,
+                            "accepted": reply.accepted(),
+                            "encryptUsernameLength": encrypt_username.len(),
+                            "ticketLength": ticket.len(),
+                            "materialHash": material,
+                            "idempotencyKeyHash": key_hash,
+                        }),
+                    )?;
+                    Ok(json!({
+                        "serviceCode": reply.service_code,
+                        "accepted": reply.accepted(),
+                        "message": reply.message,
+                    }))
                 }
-            },
-        )
+                Err(error) => {
+                    // The signed outcome is unknown after a failed submission;
+                    // keep the short root-cause text for diagnosis.
+                    let text = error.to_string();
+                    let mut end = text.len().min(500);
+                    while end > 0 && !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    core.store.append_event(
+                        &account,
+                        action.failed_event_name(),
+                        &json!({
+                            "scene": scene,
+                            "action": action.name(),
+                            "encryptUsernameLength": encrypt_username.len(),
+                            "ticketLength": ticket.len(),
+                            "materialHash": material,
+                            "outcome": "unknown",
+                            "error": &text[..end],
+                        }),
+                    )?;
+                    Err(error)
+                }
+            }
+        })
     }
 }
 
@@ -383,12 +386,12 @@ mod tests {
         let (core, _temp) = core();
         core.set_contact_request_gate("one", true).unwrap();
         let error = core
-            .accept_contact_request("one", "V2_example", "ticket", 14, "")
+            .accept_contact_request("one", "wxid_applicant", "V2_example", "ticket", 14, "")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("invalid_contact_accept_request"));
         let error = core
-            .accept_contact_request("one", "", "ticket", 14, "key")
+            .accept_contact_request("one", "wxid_applicant", "", "ticket", 14, "key")
             .await
             .unwrap_err();
         assert!(error

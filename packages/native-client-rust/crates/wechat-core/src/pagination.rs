@@ -7,7 +7,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    sync::Arc,
 };
 use wechat_profile::{ListQuery, MessageQuery, ProfileReader};
 
@@ -37,6 +38,34 @@ struct View {
     message_threads: BTreeMap<String, String>,
 }
 const MAX_ITEMS: usize = 100_000;
+
+/// Generation-scoped cache of whole-table catalog rows.
+///
+/// `catalog_page` re-reads every row so view membership covers the current
+/// generation; interactive clients then request one page at a time, which
+/// repeats the full read for every page. Rows for `contacts`, `groups` and
+/// `members` derive solely from the profile snapshot, so the reader's
+/// generation alone invalidates them. Bounded LRU: a generation bump writes a
+/// new key and eviction drops the coldest entry.
+#[derive(Default)]
+pub(crate) struct CatalogRowsCache {
+    entries: VecDeque<(String, Arc<Vec<Value>>)>,
+}
+impl CatalogRowsCache {
+    const MAX_ENTRIES: usize = 16;
+    fn get(&mut self, key: &str) -> Option<Arc<Vec<Value>>> {
+        let position = self.entries.iter().position(|(k, _)| k == key)?;
+        let (_, rows) = self.entries.remove(position)?;
+        self.entries.push_front((key.to_owned(), rows.clone()));
+        Some(rows)
+    }
+    fn put(&mut self, key: String, rows: Arc<Vec<Value>>) {
+        while self.entries.len() >= Self::MAX_ENTRIES {
+            self.entries.pop_front();
+        }
+        self.entries.push_front((key, rows));
+    }
+}
 // Large history exports need a bounded window longer than an interactive read.
 const VIEW_SECONDS: i64 = 30 * 60;
 
@@ -117,8 +146,12 @@ impl Core {
         }
         let reader = self.profile_reader_owned(account)?;
         let own = self.profile_username(account)?;
-        let mut item = self
-            .catalog_rows(account, kind, None, &reader, own.as_deref(), None)?
+        let rows = if kind == "threads" {
+            self.catalog_rows(account, kind, None, &reader, own.as_deref(), None)?
+        } else {
+            (*self.catalog_rows_cached(account, kind, None, &reader, own.as_deref())?).clone()
+        };
+        let mut item = rows
             .into_iter()
             .find(|r| r["id"] == id)
             .context("no rows")?;
@@ -133,6 +166,39 @@ impl Core {
             self.classify_peers(std::slice::from_mut(&mut item), &reader)?;
         }
         Ok(item)
+    }
+    /// Whole-table rows for `contacts`/`groups`/`members`, reused across page
+    /// requests until the profile generation changes. Message and thread rows
+    /// are excluded: they embed store-side state (read versions, recall and
+    /// friend-request enrichment) that a profile generation bump does not cover.
+    fn catalog_rows_cached(
+        &self,
+        account: &str,
+        kind: &str,
+        subject: Option<&str>,
+        reader: &ProfileReader,
+        own: Option<&str>,
+    ) -> Result<Arc<Vec<Value>>> {
+        if !matches!(kind, "contacts" | "groups" | "members") {
+            bail!("invalid_request");
+        }
+        let key = format!(
+            "{account}\n{kind}\n{}\n{}\n{}",
+            subject.unwrap_or_default(),
+            own.unwrap_or_default(),
+            reader.generation()
+        );
+        let mut cache = self
+            .shared
+            .catalog_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("catalog cache unavailable"))?;
+        if let Some(rows) = cache.get(&key) {
+            return Ok(rows);
+        }
+        let rows = Arc::new(self.catalog_rows(account, kind, subject, reader, own, None)?);
+        cache.put(key, rows.clone());
+        Ok(rows)
     }
     /// Caller holds the account writer or a request-owned profile/control snapshot.
     pub fn catalog_page(
@@ -248,14 +314,22 @@ impl Core {
             let message_limit =
                 (kind == "messages" && q.search.is_none() && q.thread_kind.is_none())
                     .then_some(limit);
-            self.catalog_rows(
-                account,
-                kind,
-                subject,
-                &reader,
-                own.as_deref(),
-                message_limit,
-            )?
+            if message_limit.is_some() {
+                self.catalog_rows(
+                    account,
+                    kind,
+                    subject,
+                    &reader,
+                    own.as_deref(),
+                    message_limit,
+                )?
+            } else if matches!(kind, "contacts" | "groups" | "members") {
+                (*self.catalog_rows_cached(account, kind, subject, &reader, own.as_deref())?)
+                    .clone()
+            } else {
+                // Searched messages still need every normalized body for matching.
+                self.catalog_rows(account, kind, subject, &reader, own.as_deref(), None)?
+            }
         };
         let metadata = json!({"sourceGeneration":reader.generation(),"coverage":reader.coverage(),"order":rows.iter().map(|r|r["id"].clone()).collect::<Vec<_>>()});
         let mut page = self.paginate_values(account, &query, q, rows, metadata)?;

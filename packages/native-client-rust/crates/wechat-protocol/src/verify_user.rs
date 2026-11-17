@@ -31,6 +31,10 @@ pub struct VerifyUserAcceptRequest {
     pub ticket: String,
     /// Scene value supplied with the inbound contact request.
     pub scene: u32,
+    /// Applicant username (wxid) supplied with the inbound contact request.
+    /// The official fill code puts this string into the VerifyUser entry.
+    #[serde(default)]
+    pub username: String,
 }
 
 /// The reply for one contact-request action, retaining the signed code.
@@ -58,7 +62,11 @@ fn supplied_text(value: &str, max: usize) -> bool {
 
 /// Encode one contact-request action (accept or decline) with the account's
 /// BaseRequest. The wire layout is identical; only the opcode differs.
-pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u32) -> Result<Vec<u8>> {
+pub fn encoded(
+    state: &AccountState,
+    input: &VerifyUserAcceptRequest,
+    opcode: u32,
+) -> Result<Vec<u8>> {
     state.validate()?;
     ensure!(
         input.encrypt_username.len() <= MAX_IDENTITY_BYTES
@@ -69,15 +77,73 @@ pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u3
         supplied_text(&input.ticket, MAX_TICKET_BYTES),
         "Invalid contact-request ticket"
     );
+    let base = p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?);
     let entry = p::message(&[
         p::bytes(1, input.encrypt_username.as_bytes()),
         p::bytes(2, input.ticket.as_bytes()),
     ])?;
+    // Official-shape probes per verifyuser-protocol-spec.md §10.4/§10.5: the
+    // official fill code writes opcode=1, scene=1, and carries the applicant
+    // material as repeated field4 VerifyUser{field1=username} entries — not
+    // the field9 VerifyUserInfo{encryptusername,ticket} template.
+    let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
+    if probe.starts_with("official") {
+        let identity = match probe.as_str() {
+            // official10: the fill function's arg3 could be the logged-in
+            // account's own username instead of the applicant's.
+            "official10" => state.own_username.as_str(),
+            "official1" => input.encrypt_username.as_str(),
+            _ => input.username.as_str(),
+        };
+        let identity = if supplied_text(identity, MAX_IDENTITY_BYTES) {
+            identity
+        } else {
+            &input.encrypt_username
+        };
+        let mut vu_fields = vec![p::bytes(1, identity.as_bytes())];
+        if probe == "official3" {
+            vu_fields.push(p::bytes(2, input.ticket.as_bytes()));
+        }
+        if probe == "official4" || probe == "official9" {
+            vu_fields.push(p::bytes(
+                14,
+                &p::message(&[p::bytes(1, input.ticket.as_bytes())])?,
+            ));
+        }
+        if matches!(probe.as_str(), "official6" | "official7" | "official8" | "official9") {
+            // VerifyUser.f14 is the shared two-string message; its first string
+            // carries the serialized six-field business object that the official
+            // fill code serializes from the request params. Field numbers are the
+            // working hypothesis (1..=6 in {int,string,int,string,int,string}
+            // order).
+            let biz = p::message(&[
+                p::uint(1, 1),
+                p::bytes(2, input.ticket.as_bytes()),
+                p::uint(3, u64::from(input.scene)),
+                p::bytes(4, input.encrypt_username.as_bytes()),
+            ])?;
+            vu_fields.push(p::bytes(
+                14,
+                &p::message(&[p::bytes(1, &biz)])?,
+            ));
+        }
+        let vu = p::message(&vu_fields)?;
+        let mut fields = vec![base, p::uint(2, 1), p::bytes(4, &vu)];
+        // official8 records the scene value noted in the Windows-side session
+        // log (-1) instead of the +1 literal seen in the Linux fill code.
+        match probe.as_str() {
+            "official8" => fields.push(p::int32(3, -1)),
+            _ => fields.push(p::uint(3, 1)),
+        }
+        if probe == "official5" || probe == "official9" {
+            fields.push(p::uint(7, 1));
+        }
+        return p::message(&fields);
+    }
     // Grey-scale probe: WX_VERIFY_PROBE switches request shapes while hunting
     // the envelope -2 rejection. Modes: no-payload (frame fields only),
     // op1/op2 (override opcode), field4 (pair into field 4 instead of 9),
     // task1/task12 (BaseRequest task), scene1/scene14 (override scene).
-    let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
     let opcode = match probe.as_str() {
         "op1" => 1,
         "op2" => 2,
@@ -94,7 +160,7 @@ pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u3
         _ => 0,
     };
     let mut fields = vec![
-        p::bytes(1, &crate::wire::base_request(&state.device, state.uin, task)?),
+        base,
         p::uint(2, u64::from(opcode)),
         p::uint(3, u64::from(scene)),
     ];
@@ -182,8 +248,7 @@ impl NativeClient {
                 self.options.receive_budget,
             )?;
             connection.rpc(state, CGI, command, &request, || Ok(()))?
-        }
-        else {
+        } else {
             let (cgi, path) = match probe.as_str() {
                 "cgi137-path-getcontact" => (CGI, "/cgi-bin/micromsg-bin/getcontact"),
                 "cgi182-path-verifyuser" => (182, PATH),
@@ -227,6 +292,7 @@ mod tests {
             encrypt_username: "V2_example".into(),
             ticket: "ticket".into(),
             scene: 14,
+            username: "wxid_applicant".into(),
         }
     }
 

@@ -94,3 +94,43 @@ vtable/New/描述符构造均无直接调用者）。本地 PE 扫描（capstone
 3. **-2 重解读**：读类 CGI 正常 + 同一提交机制 → -2 与 handler 参数校验失败（形状/取值错）兼容，不必再归因网关或会话权限。
 
 **修订后的下一步**：按 spec §10.5 的 `baseline2` 矩阵重测（opcode=1 / scene=1 / field4 载重），在 `wechat-protocol/src/verify_user.rs` 加 `WX_VERIFY_PROBE=baseline2` 系列开关；ret=0 或出现非 -2 业务码即收敛。
+
+## 9. 官方形状探针矩阵（2026-11-17，mac 端，WX_VERIFY_PROBE=official*）
+
+> 环境：mac 本机 hub（debug 构建 74b87cd+official 探针），账号 `account-self-a`
+>（wxid-self-a / 昵称A），申请人 `wxid-applicant`（昵称B，scene=15，
+> 2026-11-17T02:16 到达）。每轮前清 `friend-request-handled:*` marker 后经
+> `POST /friend-requests/{user}/accept` 触发。
+
+**前置发现**：新登录后 `verify-user` gate 默认关闭——accept 直接被
+`contact_accept_gate_closed` 拦截（HTTP 500 operation_failed，operation 未创建）。
+必须先 `POST /contacts/verify-user/gate {"enabled":true}`。
+
+**业务应答突破**：官方形状（opcode=1/scene=1/field4 VerifyUser）首次拿到**业务层应答**
+`serviceCode=-2, message="Invalid argument"`（含 \n\x10 前缀），不再是信封层 0B 空载荷——
+服务器已解析 body，「网关层拒绝」解读正式撤销（与 §10.5 一致）。
+
+| 探针 | VerifyUser 形状 | 结果 |
+|---|---|---|
+| official1 | f1=encrypt_username | -2 Invalid argument（业务层） |
+| official2 | f1=申请人 username | -2 IA |
+| official3 | f1=username + f2=ticket | -2 IA |
+| official4 | f1=username + f14={1:ticket} | -2 IA |
+| official6 | f1=username + f14={1:biz{1:1,2:ticket,3:scene15,4:encryptusername}} | -2 IA |
+| official8 | official6 但外层 scene=-1（会话记录里的值） | -2 IA |
+| official9 | official6 + field7=[1] + f14={1:ticket}（双 f14，形状有瑕疵） | -2 IA |
+| official10 | official6 但 f1=own username（wxid-self-a） | -2 IA |
+
+**结论**：形状族（opcode=1/scene=1/field4 VerifyUser）已被服务器路由+解析，
+「Invalid argument」稳定出现说明**某个具体参数值/字段仍不对**。剩余候选：
+1. biz 对象（0x38B 六字段 {int,string,int,string,int,string}）的真实字段号与内容
+   （本轮假设 1..=6 顺序、内容 {1, ticket, scene15, encryptusername}——未验证）
+2. VerifyUser 其余字段（f4/f5/f6/f7/f9/f12/f15/f16/f17）官方 accept 是否填了
+3. field7 repeated int32 的真实取值
+4. BaseRequest.task（task1/task12 探针未跑完）
+5. ticket 编码：申请 XML 的 ticket 带 `v2_ticket@str=` 前缀，verifyuser 是否要求
+   解码后的值（候选：剥离前缀 / base64 解码）
+6. gate/rate-limit/operation 链路本身已工作正常（HTTP 202 + operation 轮询）
+
+探针实现：`wechat-protocol/src/verify_user.rs` encoded() 的 `official*` 分支；
+core 侧 `VerifyUserAcceptRequest` 新增 `username` 字段（申请人 wxid，官方 fill arg3 候选）。

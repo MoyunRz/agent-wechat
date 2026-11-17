@@ -129,6 +129,7 @@ pub struct CoreShared {
     pub(crate) cursor_vault: Arc<Vault>,
     pub(crate) password_proofs: Mutex<BTreeMap<String, String>>,
     pub(crate) recall_sync_cache: Mutex<BTreeMap<String, crate::recall_evidence::RecallSyncCache>>,
+    pub(crate) catalog_cache: Mutex<crate::pagination::CatalogRowsCache>,
     pub(crate) profile_readers:
         Mutex<BTreeMap<String, (std::time::Instant, wechat_profile::OwnedReaderCache)>>,
     #[cfg(test)]
@@ -364,6 +365,7 @@ impl Core {
                 cursor_vault: Arc::new(cursor_vault),
                 password_proofs: Mutex::new(BTreeMap::new()),
                 recall_sync_cache: Mutex::new(BTreeMap::new()),
+                catalog_cache: Mutex::new(crate::pagination::CatalogRowsCache::default()),
                 profile_readers: Mutex::new(BTreeMap::new()),
                 #[cfg(test)]
                 profile_snapshot_opens: std::sync::atomic::AtomicUsize::new(0),

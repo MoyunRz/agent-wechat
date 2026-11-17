@@ -73,13 +73,10 @@ pub(crate) fn parse_request_material(
     if !supplied(&from_username, 512) || !identity_ok(&from_username) {
         return None;
     }
-    if !supplied(&encrypt_username, MAX_ENCRYPT_USERNAME)
-        || !supplied(&ticket, MAX_TICKET)
-    {
+    if !supplied(&encrypt_username, MAX_ENCRYPT_USERNAME) || !supplied(&ticket, MAX_TICKET) {
         return None;
     }
-    let scene = request_field(root, "scene")
-        .and_then(|value| value.trim().parse::<u32>().ok());
+    let scene = request_field(root, "scene").and_then(|value| value.trim().parse::<u32>().ok());
     let from_nickname = request_field(root, "fromnickname")
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -112,7 +109,11 @@ impl Core {
 
     /// Attach the request status to one normalized type-37 message card:
     /// handled markers win, otherwise a confirmed contact means accepted.
-    pub(crate) fn enrich_friend_request_status(&self, account: &str, value: &mut Value) -> Result<()> {
+    pub(crate) fn enrich_friend_request_status(
+        &self,
+        account: &str,
+        value: &mut Value,
+    ) -> Result<()> {
         if value["type"].as_i64() != Some(37) {
             return Ok(());
         }
@@ -120,31 +121,37 @@ impl Core {
         let Some(request) = value.get_mut("friendRequest").filter(|v| v.is_object()) else {
             return Ok(());
         };
-        let username = request["fromUsername"].as_str().unwrap_or_default().to_owned();
+        let username = request["fromUsername"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
         let status = if let Some(handled) = self
             .store
             .runtime(account, &Self::handled_marker_key(&message_id))?
         {
-            if handled == b"accepted" { "accepted" } else { "declined" }
-        }
-        else {
+            if handled == b"accepted" {
+                "accepted"
+            } else {
+                "declined"
+            }
+        } else {
             let confirmed = if username.is_empty() {
                 false
-            }
-            else {
+            } else {
                 let reader = self.profile_reader_owned(account)?;
                 self.confirmed_contact(&reader, &username)?
             };
-            if confirmed { "accepted" } else { "pending" }
+            if confirmed {
+                "accepted"
+            } else {
+                "pending"
+            }
         };
         request["status"] = json!(status);
         Ok(())
     }
 
-    fn stored_request_messages(
-        &self,
-        account: &str,
-    ) -> Result<Vec<wechat_profile::Message>> {
+    fn stored_request_messages(&self, account: &str) -> Result<Vec<wechat_profile::Message>> {
         let reader = self.profile_reader_owned(account)?;
         let own = self.profile_username(account)?;
         let page = reader.messages(&wechat_profile::MessageQuery {
@@ -159,10 +166,7 @@ impl Core {
 
     /// Newest stored request per applicant. The reader returns newest first;
     /// the first row per applicant wins regardless of order by comparing times.
-    fn latest_requests(
-        &self,
-        account: &str,
-    ) -> Result<BTreeMap<String, RequestMaterial>> {
+    fn latest_requests(&self, account: &str) -> Result<BTreeMap<String, RequestMaterial>> {
         let mut latest: BTreeMap<String, RequestMaterial> = BTreeMap::new();
         for message in self.stored_request_messages(account)? {
             let Some(text) = message.content.text.as_deref() else {
@@ -282,7 +286,8 @@ impl Core {
         if already {
             blocking.push("already_friends");
         }
-        let gate_open = self.store
+        let gate_open = self
+            .store
             .runtime(account, "verify-user-gate")?
             .is_some_and(|value| value == b"1");
         if !gate_open {
@@ -343,14 +348,13 @@ impl Core {
             "invalid_contact_request_username"
         );
         let latest = self.latest_requests(account)?;
-        let material = latest
-            .get(username)
-            .context("contact_request_not_found")?;
+        let material = latest.get(username).context("contact_request_not_found")?;
         let scene = material.scene.context("contact_request_missing_scene")?;
         let marker = Self::handled_marker_key(&material.message_id);
         let operation = if action == "accepted" {
             self.accept_contact_request(
                 account,
+                username,
                 &material.encrypt_username,
                 &material.ticket,
                 scene,
@@ -360,6 +364,7 @@ impl Core {
         } else {
             self.decline_contact_request(
                 account,
+                username,
                 &material.encrypt_username,
                 &material.ticket,
                 scene,

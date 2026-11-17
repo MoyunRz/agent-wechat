@@ -117,7 +117,14 @@ async fn accept_contact(
     let key = idempotency_key(&headers)?;
     let operation = app
         .core
-        .accept_contact_request(&a, &input.encrypt_username, &input.ticket, input.scene, key)
+        .accept_contact_request(
+            &a,
+            "",
+            &input.encrypt_username,
+            &input.ticket,
+            input.scene,
+            key,
+        )
         .await?;
     Ok((
         StatusCode::ACCEPTED,

@@ -344,7 +344,8 @@ impl AuthenticatedPacket {
     /// Call only on the plaintext returned by the authenticated MMTLS transport.
     pub fn decode_verified_transport_reply(&self, input: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let envelope = split(input)?;
-        if let Err(rejection) = ServiceRejected::check(Service::NativeEnvelope, envelope.return_code)
+        if let Err(rejection) =
+            ServiceRejected::check(Service::NativeEnvelope, envelope.return_code)
         {
             // The envelope rejected the request before any business decoding.
             // Best-effort decrypt the payload to surface the service's own
