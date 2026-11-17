@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { wechatApi } from '../api'
 import { initials } from '../format'
-import { specialAvatarBackground, specialAvatarFor } from '../special-avatars'
+import { isWecomPeer, specialAvatarBackground, specialAvatarFor, WECOM_AVATAR_BACKGROUND } from '../special-avatars'
 import type { ThreadAvatarMember } from '../types'
 
 const props = withDefaults(defineProps<{
@@ -88,6 +88,9 @@ const avatarIdentity = computed(() => (props.username ?? '').trim())
 // 内置系统账号（文件传输助手、微信支付等）使用固定官方风格图标，不请求远端头像。
 const special = computed(() => specialAvatarFor(props.username, props.name))
 const specialBackground = computed(() => (special.value ? specialAvatarBackground(special.value) : ''))
+// 企业微信客服会话没有品牌头像时，回退到企业微信风格的默认图标（有品牌头像仍显示品牌头像）。
+const isWecom = computed(() => isWecomPeer(avatarIdentity.value))
+const wecomBackground = WECOM_AVATAR_BACKGROUND
 const showImage = computed(() => Boolean(avatarObjectUrl.value) && !failed.value)
 
 async function loadAvatarBytes(): Promise<void> {
@@ -236,6 +239,12 @@ function memberStyle(member: ThreadAvatarMember): Record<string, string> {
       </svg>
       <svg v-else class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M3.25 7A2.25 2.25 0 0 1 5.5 4.75h3.9c.66 0 1.28.3 1.7.8l1.06 1.28h6.34a2.25 2.25 0 0 1 2.25 2.25v8.17a2.25 2.25 0 0 1-2.25 2.25h-13a2.25 2.25 0 0 1-2.25-2.25V7z" fill="#fff" />
+      </svg>
+    </span>
+    <span v-else-if="isWecom" class="fallback special" :style="{ background: wecomBackground }">
+      <svg class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.1 6A2.15 2.15 0 0 1 6.25 3.85h7.9A2.15 2.15 0 0 1 16.3 6v5.4a2.15 2.15 0 0 1-2.15 2.15H9.6l-3.9 3.1v-3.1h.55A2.15 2.15 0 0 1 4.1 11.4Z" fill="#fff" />
+        <path d="M14.9 10.3h3a2.15 2.15 0 0 1 2.15 2.15v3.2a2.15 2.15 0 0 1-2.15 2.15h-.35v2.3l-2.85-2.3h-2a2.15 2.15 0 0 1-2-1.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />
       </svg>
     </span>
     <span v-else class="fallback" :style="fallbackStyle">

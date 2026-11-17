@@ -47,3 +47,11 @@ export function specialAvatarFor(username?: string | null, name?: string | null)
 export function specialAvatarBackground(id: SpecialAvatarId): string {
   return SPECIAL_BACKGROUNDS[id]
 }
+
+/** 企业微信客服（@openim 家族）会话：无品牌头像时使用企业微信风格的默认图标。 */
+export function isWecomPeer(username?: string | null): boolean {
+  const id = (username ?? '').trim().toLowerCase()
+  return id.endsWith('@openim') || id.endsWith('@kefu.openim')
+}
+
+export const WECOM_AVATAR_BACKGROUND = 'linear-gradient(135deg, #4795ff, #1a6ce0)'
