@@ -795,9 +795,12 @@ const activeThread = computed(() => {
 /** 已确认好友的用户名集合（localType 非空 = 微信服务器通讯录同步确认）。 */
 const friendNames = ref<Set<string>>(new Set())
 
-/** 全部会话未读总数：左侧导航聊天图标的计数标记。 */
+/** 全部会话未读总数：左侧导航聊天图标的计数标记。免打扰会话（灰色徽标）不计入。 */
 const unreadTotal = computed(() =>
-  threads.value.reduce((sum, thread) => sum + (thread.unreadCount ?? 0), 0))
+  threads.value.reduce(
+    (sum, thread) => sum + (thread.muted === true ? 0 : (thread.unreadCount ?? 0)),
+    0,
+  ))
 
 /**
  * 待处理好友申请数：左侧导航通讯录图标的计数标记。
