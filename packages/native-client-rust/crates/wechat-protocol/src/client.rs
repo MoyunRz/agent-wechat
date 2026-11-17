@@ -480,7 +480,7 @@ impl Default for NativeOptions {
 /// recovery journal. Explicit state export is secret data, not a second writer.
 #[derive(Clone)]
 pub struct NativeClient {
-    options: NativeOptions,
+    pub(crate) options: NativeOptions,
     account: Option<std::sync::Arc<account::OwnedAccount>>,
     submission_guard: Option<std::sync::Arc<dyn Fn() -> Result<()> + Send + Sync>>,
     call_reply_observer: Option<std::sync::Arc<CallReplyObserver>>,

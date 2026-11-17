@@ -134,7 +134,7 @@ impl Connection {
         }
         Ok(())
     }
-    fn rpc(
+    pub(crate) fn rpc(
         &mut self,
         state: &mut AccountState,
         cgi: u16,

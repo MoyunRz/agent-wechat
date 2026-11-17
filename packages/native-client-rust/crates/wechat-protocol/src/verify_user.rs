@@ -75,17 +75,28 @@ pub fn encoded(state: &AccountState, input: &VerifyUserAcceptRequest, opcode: u3
     ])?;
     // Grey-scale probe: WX_VERIFY_PROBE switches request shapes while hunting
     // the envelope -2 rejection. Modes: no-payload (frame fields only),
-    // op1/op2 (override opcode), field4 (pair into field 4 instead of 9).
+    // op1/op2 (override opcode), field4 (pair into field 4 instead of 9),
+    // task1/task12 (BaseRequest task), scene1/scene14 (override scene).
     let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
     let opcode = match probe.as_str() {
         "op1" => 1,
         "op2" => 2,
         _ => opcode,
     };
+    let scene = match probe.as_str() {
+        "scene1" => 1,
+        "scene14" => 14,
+        _ => input.scene,
+    };
+    let task = match probe.as_str() {
+        "task1" => 1,
+        "task12" => 12,
+        _ => 0,
+    };
     let mut fields = vec![
-        p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?),
+        p::bytes(1, &crate::wire::base_request(&state.device, state.uin, task)?),
         p::uint(2, u64::from(opcode)),
-        p::uint(3, u64::from(input.scene)),
+        p::uint(3, u64::from(scene)),
     ];
     if probe != "no-payload" {
         if probe == "field4" {
@@ -159,7 +170,27 @@ impl NativeClient {
         opcode: u32,
     ) -> Result<VerifyUserAcceptReply> {
         let request = zeroize::Zeroizing::new(encoded(state, input, opcode)?);
-        let reply = self.authenticated_rpc(state, CGI, PATH, &request)?;
+        // Grey-scale cross probe: swap the CGI number, the URL path, or send
+        // via a dedicated longlink connection (WX_VERIFY_CROSS=longlink:<cmd>)
+        // to distinguish a gateway-routing rejection from a request-body one.
+        let probe = std::env::var("WX_VERIFY_CROSS").unwrap_or_default();
+        let reply = if let Some(command) = probe.strip_prefix("longlink:") {
+            let command: u32 = command.parse().unwrap_or(u32::from(CGI));
+            let mut connection = crate::push::Connection::open(
+                state,
+                self.options.timeout,
+                self.options.receive_budget,
+            )?;
+            connection.rpc(state, CGI, command, &request, || Ok(()))?
+        }
+        else {
+            let (cgi, path) = match probe.as_str() {
+                "cgi137-path-getcontact" => (CGI, "/cgi-bin/micromsg-bin/getcontact"),
+                "cgi182-path-verifyuser" => (182, PATH),
+                _ => (CGI, PATH),
+            };
+            self.authenticated_rpc(state, cgi, path, &request)?
+        };
         decode_response(&reply)
     }
 }
