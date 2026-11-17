@@ -2413,8 +2413,8 @@ async fn serve(
         ),
         None => eprintln!("Daemon ready on {listen} (server ID {}).", store.server_id),
     }
-    let local =
-        axum::serve(listener, router.clone()).with_graceful_shutdown(shutdown(core.clone(), parent));
+    let local = axum::serve(listener, router.clone())
+        .with_graceful_shutdown(shutdown(core.clone(), parent));
     if let Some((socket, tls)) = network {
         let handle = axum_server::Handle::new();
         let stop_handle = handle.clone();
