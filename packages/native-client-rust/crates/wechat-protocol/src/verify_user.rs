@@ -86,7 +86,10 @@ pub fn encoded(
         "official13" | "task12" => 12,
         _ => 0,
     };
-    let base = p::bytes(1, &crate::wire::base_request(&state.device, state.uin, task)?);
+    let base = p::bytes(
+        1,
+        &crate::wire::base_request(&state.device, state.uin, task)?,
+    );
     let entry = p::message(&[
         p::bytes(1, input.encrypt_username.as_bytes()),
         p::bytes(2, input.ticket.as_bytes()),
@@ -120,8 +123,16 @@ pub fn encoded(
         }
         if matches!(
             probe.as_str(),
-            "official6" | "official7" | "official8" | "official9" | "official11" | "official14"
-            | "official15" | "official17" | "official18" | "official19"
+            "official6"
+                | "official7"
+                | "official8"
+                | "official9"
+                | "official11"
+                | "official14"
+                | "official15"
+                | "official17"
+                | "official18"
+                | "official19"
         ) {
             // VerifyUser.f14 is the shared two-string message; its first string
             // carries the serialized six-field business object that the official
@@ -164,10 +175,7 @@ pub fn encoded(
                     &p::message(&[p::uint(1, biz.len() as u64), p::bytes(2, &biz)])?,
                 ));
             } else {
-                vu_fields.push(p::bytes(
-                    14,
-                    &p::message(&[p::bytes(1, &biz)])?,
-                ));
+                vu_fields.push(p::bytes(14, &p::message(&[p::bytes(1, &biz)])?));
             }
         }
         let vu = p::message(&vu_fields)?;
@@ -175,7 +183,11 @@ pub fn encoded(
         // opcode/scene pair (3/15): the session capture shows the submitted
         // request carrying 3/15 while the fill code writes 1/1, so the hub
         // layer may overwrite both literals before submission.
-        let opcode_field = if probe == "official14" || probe == "official19" { 3 } else { 1 };
+        let opcode_field = if probe == "official14" || probe == "official19" {
+            3
+        } else {
+            1
+        };
         let mut fields = vec![base, p::uint(2, opcode_field), p::bytes(4, &vu)];
         // official8 records the scene value noted in the Windows-side session
         // log (-1) instead of the +1 literal seen in the Linux fill code.
@@ -201,7 +213,10 @@ pub fn encoded(
     // carrier (the opcode=3 handler rejects field4 shapes at the envelope
     // layer, and VerifyUserInfo only has the two string fields). Each mode
     // permutes the ticket/identity placement and the ticket envelope prefix.
-    if matches!(probe.as_str(), "official20" | "official21" | "official22" | "official23") {
+    if matches!(
+        probe.as_str(),
+        "official20" | "official21" | "official22" | "official23"
+    ) {
         let stripped_ticket = {
             let stripped = input
                 .ticket
@@ -215,13 +230,11 @@ pub fn encoded(
             "official22" => (input.encrypt_username.as_str(), stripped_ticket),
             _ => (stripped_ticket, input.encrypt_username.as_str()),
         };
-        let entry = p::message(&[p::bytes(1, first.as_bytes()), p::bytes(2, second.as_bytes())])?;
-        return p::message(&[
-            base,
-            p::uint(2, 3),
-            p::uint(3, 15),
-            p::bytes(9, &entry),
-        ]);
+        let entry = p::message(&[
+            p::bytes(1, first.as_bytes()),
+            p::bytes(2, second.as_bytes()),
+        ])?;
+        return p::message(&[base, p::uint(2, 3), p::uint(3, 15), p::bytes(9, &entry)]);
     }
     // Grey-scale probe: WX_VERIFY_PROBE switches request shapes while hunting
     // the envelope -2 rejection. Modes: no-payload (frame fields only),
@@ -317,7 +330,10 @@ impl NativeClient {
         crate::trace::stage(
             "verifyuser-encode",
             &[
-                ("probe", std::env::var("WX_VERIFY_PROBE").unwrap_or_default()),
+                (
+                    "probe",
+                    std::env::var("WX_VERIFY_PROBE").unwrap_or_default(),
+                ),
                 ("input_scene", input.scene.to_string()),
                 ("shape", crate::trace::shape(&request)),
             ],

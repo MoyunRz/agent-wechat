@@ -1089,10 +1089,7 @@ impl NativeClient {
             &packet.packet,
             self.options.timeout,
         )?;
-        crate::trace::stage(
-            "mmtls-reply",
-            &[("reply", crate::trace::head(&reply, 32))],
-        );
+        crate::trace::stage("mmtls-reply", &[("reply", crate::trace::head(&reply, 32))]);
         let (plain, cookie) = packet.decode_verified_transport_reply(&reply)?;
         if !cookie.is_empty() {
             state.cookie = cookie;
