@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { formatListTime, previewText, threadName } from '../format'
+import { formatListTime, previewText, threadName, threadNoNotify } from '../format'
 import type { AccountSummary, Thread, ThreadFilter } from '../types'
 import Icon from './Icon.vue'
 import ThreadAvatar from './ThreadAvatar.vue'
@@ -346,7 +346,7 @@ defineExpose({ focusSearch })
                   <span
                     v-if="(item.thread!.unreadCount ?? 0) > 0"
                     class="unread-badge"
-                    :class="{ 'unread-muted': item.thread!.muted }"
+                    :class="{ 'unread-muted': threadNoNotify(item.thread) }"
                   >
                     {{ (item.thread!.unreadCount ?? 0) > 99 ? '99+' : item.thread!.unreadCount }}
                   </span>

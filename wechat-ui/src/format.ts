@@ -30,6 +30,21 @@ export function threadName(thread: Thread | null | undefined): string {
   return name || thread.id || '未命名会话'
 }
 
+/**
+ * 「不通知」判定：daemon 明确标记的免打扰，或公众号/服务号会话（gh_）。
+ * 手机侧对公众号设置的消息静音不进桌面 profile 的 contact.flag（实测 gh_ 行
+ * flag 不携带 0x200），而官方客户端本就把公众号消息折叠不打扰——gh_ 统一按
+ * 不通知呈现：灰标、不计导航总数、不弹卡片。
+ */
+export function threadNoNotify(thread: { muted?: boolean | null, peerId?: string | null, id?: string } | null | undefined): boolean {
+  if (!thread)
+    return false
+  if (thread.muted === true)
+    return true
+  const peer = (thread.peerId ?? thread.id ?? '').trim()
+  return peer.startsWith('gh_')
+}
+
 export function threadKindLabel(kind: string, peerId?: string | null): string {
   // daemon 对 gh_ 公众号/服务号与 @openim 客服会话仍给 direct 分类，按 peerId 修正展示。
   // @openim 家族即企业微信客服（瑞幸等品牌客服与小程序客服同属此通道）。

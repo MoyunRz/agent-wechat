@@ -11,6 +11,7 @@ import {
   previewText,
   threadKindLabel,
   threadName,
+  threadNoNotify,
 } from './format'
 import type {
   AccountSummary,
@@ -795,10 +796,10 @@ const activeThread = computed(() => {
 /** 已确认好友的用户名集合（localType 非空 = 微信服务器通讯录同步确认）。 */
 const friendNames = ref<Set<string>>(new Set())
 
-/** 全部会话未读总数：左侧导航聊天图标的计数标记。免打扰会话（灰色徽标）不计入。 */
+/** 全部会话未读总数：左侧导航聊天图标的计数标记。不通知会话（免打扰/公众号，灰色徽标）不计入。 */
 const unreadTotal = computed(() =>
   threads.value.reduce(
-    (sum, thread) => sum + (thread.muted === true ? 0 : (thread.unreadCount ?? 0)),
+    (sum, thread) => sum + (threadNoNotify(thread) ? 0 : (thread.unreadCount ?? 0)),
     0,
   ))
 
@@ -2710,8 +2711,9 @@ function pushIncomingToast(threadId: string): void {
   const thread = threads.value.find(item => item.id === threadId)
   if (!thread)
     return
-  // 其他设备设置的「消息免打扰」：不弹提示卡片，未读徽标保留（与官方客户端一致）。
-  if (thread.muted === true)
+  // 其他设备设置的「消息免打扰」与公众号/服务号（官方折叠不打扰）：
+  // 不弹提示卡片，未读徽标保留（与官方客户端一致）。
+  if (threadNoNotify(thread))
     return
   if ((thread.lastMessage?.direction ?? '') === 'outgoing')
     return
