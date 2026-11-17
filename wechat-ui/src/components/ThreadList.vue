@@ -303,7 +303,10 @@ defineExpose({ focusSearch })
               <span class="thread-row thread-preview-row">
                 <span class="thread-preview">{{ threadName(item.group.latest) }}：{{ previewText(item.group.latest) }}</span>
                 <span class="thread-badges">
-                  <span v-if="item.group.unread > 0" class="unread-badge">
+                  <span
+                    v-if="item.group.unread > 0"
+                    class="unread-badge unread-muted"
+                  >
                     {{ item.group.unread > 99 ? '99+' : item.group.unread }}
                   </span>
                   <Icon
