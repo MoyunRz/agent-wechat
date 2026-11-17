@@ -7,7 +7,7 @@ field is not mistaken for complete protocol support.
 | Domain | Tracker | Current focus |
 | --- | --- | --- |
 | Contact updates | [Contact updates](contact-updates.md) | Incoming notification path, contact fields, profile merge and mute-state reads |
-| Contact requests (verifyuser) | [Protocol spec](verifyuser-protocol-spec.md) · [Reversal plan](verifyuser-reversal-plan.md) | CGI 137, request field layout, acceptance payload and grey-release steps |
+| Contact requests (verifyuser) | Separate tracker to be added | CGI 137, request field layout and acceptance payload |
 | Threads API | Separate tracker to be added | History, summaries, read state and events |
 | Groups API | Separate tracker to be added | Group metadata, membership, changes and events |
 
