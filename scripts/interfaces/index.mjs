@@ -50,6 +50,19 @@ const everything = ['scripts/interfaces/', 'package.json'];
 
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').filter(Boolean);
 
+// Windows launches package binaries such as pnpm through .cmd shims, which a
+// direct spawn cannot run; go through the shell there and pre-quote arguments.
+// Other platforms spawn directly, exactly as before.
+function runStep(command, args, env) {
+  if (process.platform !== 'win32') {
+    return execFileSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } });
+  }
+  const line = [command, ...args]
+    .map(part => (/\s/.test(part) ? `"${part}"` : part))
+    .join(' ');
+  return execFileSync(line, { cwd: root, stdio: 'inherit', shell: true, env: { ...process.env, ...env } });
+}
+
 /** Files changed since the merge base, plus uncommitted and untracked files; `null` if the base is unknown. */
 export function changedFiles(base = process.env.INTERFACES_BASE ?? 'origin/main') {
   try {
@@ -107,7 +120,7 @@ function main(argv) {
     for (const [command, args, env = {}] of step.commands(check)) {
       console.log(`> ${command} ${args.join(' ')}`);
       try {
-        execFileSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } });
+        runStep(command, args, env);
       } catch {
         ok = false;
         break;
