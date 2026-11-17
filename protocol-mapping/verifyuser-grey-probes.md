@@ -182,6 +182,42 @@ task 变量从未传入 base_request）；SKBuiltinBuffer_t f14 形状（officia
 3. 服务器端 -2 IA 的「值」假设验证：对同一申请**先 getcontact 拉取申请人资料再 accept**、
    或 scene=15（扫码）特判材料。
 
+### 9.2 Frida 动态取证（2026-11-17 晚，10.7.1.29 Linux 微信客户端，hook 在线）
+
+**环境**：10.7.1.29（Ubuntu 22.04，桌面会话）运行微信 Linux 4.1.x 客户端
+（`~/reverse/wechat-root/opt/wechat/wechat`，181,208,032 B——与 §10.6 反汇编同一文件，全部 VA 偏移直接可用）。
+Frida 17.26.4（`python3 -m pip install --user frida-tools`，yama ptrace_scope=1 下用 **spawn 模式**）。
+脚本：`~/reverse/frida-accept/{hook_verifyuser.js, drive_verifyuser.py}`；启动
+`nohup python3 -u ~/reverse/frida-accept/drive_verifyuser.py 7200 >/tmp/drive.log 2>&1 &`（微信自动恢复登录态）。
+
+**Hook 点**：fill `0x69200e0`（params 六字段）、CopyFrom `0x7f26170`（预填 VerifyUserRequest 对象 0xA0 dump）、
+VerifyUserRequest::serialize `0x7f25a50`（hasbits@+0x98）、glue `0x69280a0`（提交确认）。
+
+**决定性结果 [硬]**：测试小号在客户端点「同意」（Verify Now）触发 verifyuser 全链
+（glue-submit → copyfrom → serialize），dump 出的 VerifyUserRequest 对象（vptr = base+0xa9c5478，
+VerifyUserRequest 确认）字段：
+
+```
++0x10  opcode  = 3      ← accept
++0x14  scene   = 1      ← 不是 15！申请来源「手机号搜索」
++0x18  field4  data ptr（repeated VerifyUser）
++0x20  field4  size  = 1（一个 VerifyUser 元素）
++0x58  field9  = 空          ← VerifyUserInfo 载体被官方 accept 完全弃用
++0x98  hasbits = 0x437
+```
+
+**§9.1 矩阵失败的归因闭合**：
+- official14/19（opcode=3+**scene=15**+field4）→ 信封层拒：**opcode=3 handler 校验 scene=1**；
+- official1-18（opcode=**1**）→ 业务层 IA：opcode=1 是「主动申请」语义（ContactHeadView 流程），
+  handler 按申请校验 accept 材料 → Invalid argument；
+- grey 旧模板（opcode=3/scene=15/**field9**）→ IA：scene 与载体双错；
+- **官方 accept 形状 = opcode=3 + scene=1 + field4=[VerifyUser{...}]，field9 不用**——§10.6 的
+  「Windows opcode accept=3 [推] 重新有效」正式成立，但 scene 必须写 1（官方运行时值）。
+
+**待补（下一轮，hook 升级版已就位）**：VerifyUser 元素内部（f1 username 值、f14 SKB{iLen, pBuffer}
+内容 hex、0x88 对象字节）+ CopyFrom 调用栈回溯（定位 accept 构造函数 VA）。升级 hook 已实现
+`dumpVerifyUser()`（解引用 field4 元素→读 f1/f14/0x88 字节）并部署，等下一轮触发。
+
 ## 11. 链路追踪实装（2026-11-17，Linux 端）
 
 `WX_PROTOCOL_TRACE=1` 后 stderr 逐阶段输出 `wx-trace <ts> <stage> k=v…`：
