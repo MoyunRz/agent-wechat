@@ -243,10 +243,14 @@ pub(crate) fn contact_patch(record: &ContactRecord) -> Result<ContactProjection>
         (11, "remark_pin_yin_initial"),
         (12, "remark_quan_pin"),
     ] {
-        if controlled.contains(&n) {
+        let value = sk(n)?;
+        // 控制掩码只保护「字段缺省」的稀疏更新：本地值保留，等待权威更新。
+        // 值显式存在时必须落库——实测按人 GetContact 响应同时携带备注与掩码
+        // id 10，缺省即跳过会让备注永远无法写入本地 contact 表。
+        if value.is_none() && controlled.contains(&n) {
             continue;
         }
-        if let Some(v) = sk(n)? {
+        if let Some(v) = value {
             out.insert(name.into(), SqlValue::Text(v));
         }
     }
