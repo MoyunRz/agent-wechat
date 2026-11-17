@@ -134,3 +134,50 @@ vtable/New/描述符构造均无直接调用者）。本地 PE 扫描（capstone
 
 探针实现：`wechat-protocol/src/verify_user.rs` encoded() 的 `official*` 分支；
 core 侧 `VerifyUserAcceptRequest` 新增 `username` 字段（申请人 wxid，官方 fill arg3 候选）。
+
+### 9.1 第二轮矩阵（2026-11-17 下午，official11-23，SKBuiltinBuffer_t 修正 + opcode 交叉）
+
+环境同 §9（账号重新扫码登录一次：官方探测高频重启 daemon 触发服务器端会话失效
+`needs_login: no_usable_saved_trust`）。每轮前清 `friend-request-handled:*`、
+`verify-user-attempt:*`、`verify-user-last`。
+
+| 探针 | 形状 | 结果 |
+|---|---|---|
+| official11 | official6 + biz.f2 ticket 剥 `v2_ticket@str=` 前缀 | -2 IA（业务层） |
+| official12 | official6 + BaseRequest.task=1 | -2 IA |
+| official13 | official6 + BaseRequest.task=12 | -2 IA |
+| official14 | opcode=3/scene=15 + official6 形状 | 信封 -2 空 payload |
+| official15 | biz 补全六字段 {5:0, 6:username} | -2 IA |
+| official16 | opcode=1 + scene=15（请求 scene 回显） | 信封 -2 |
+| official17 | opcode=1/scene=1/f7 + f14={1:len,2:biz}（SKB 修正） | 首测信封 -2；复测 -2 IA |
+| official18 | official17 + ticket 剥前缀 | -2 IA |
+| official19 | opcode=3/scene=15 + SKB 修正形状 | 信封 -2（复现 official14） |
+| official20 | opcode=3/scene=15 + field9={f1:ticket, f2:encryptusername} | -2 IA |
+| official21 | opcode=3/scene=15 + field9={f1:username, f2:ticket} | 信封 -2 |
+| official22 | opcode=3/scene=15 + field9={f1:encryptusername, f2:ticket 剥前缀} | 信封 -2 |
+| official23 | opcode=3/scene=15 + field9={f1:ticket 剥前缀, f2:encryptusername} | 信封 -2 |
+
+**探针实现新增**：BaseRequest.task 覆盖（official12/13 + 修复 grey task1/task12 死代码——旧实现
+task 变量从未传入 base_request）；SKBuiltinBuffer_t f14 形状（official17-19）；field9 排列
+（official20-23）。
+
+**本轮结论**：
+1. **信封层 -2 有随机抖动**：official17 同形状两次结果不同（信封/业务层），单次信封拒不能
+   定罪形状；opcode=3+field4 两次复现信封拒是稳定信号。
+2. **稳定路由规则**：opcode=1/scene=1 → handler（业务层 IA）；scene=15+opcode=1 → 信封拒；
+   opcode=3+field4 → 信封拒（稳定）；opcode=3+field9 → handler（grey 旧模板 + official20 均业务层 IA）。
+3. **f14 = SKBuiltinBuffer_t{1:iLen, 2:pBuffer} 形状可进 handler**——服务器端接受 {1:varint}
+   （旧 {1:bytes} 形状也进 handler，服务器对 f14 的 parse 两种都容了或服务器 proto 与 4.1.13
+   客户端存在分歧——无法从应答区分）。
+4. **handler 级 IA 覆盖全部形状组合**：biz 内容/字段映射、ticket 编码、BaseRequest.task、
+   f7 值、f9 排列均未收敛 → 问题不再是静态可穷举的形状，而是「值」或「accept 构造点未定位」。
+5. spec §10.6 定性修正后，**0x69200e0 是主动加好友（ContactHeadView）流程**，accept 的官方
+   构造点仍缺失；opcode 在官方代码里是运行时变量（无 =3 立即数写点）。
+
+**下一步候选**（按价值排序）：
+1. 抓官方 4.x 客户端真实 accept 包（Windows/mac 端 MTEM/代理，操作一次同意好友）——直接
+   破案，所有形状假设一次性验证；
+2. Linux 侧继续静态：从 `0x76be360` 续体的回调对象（r14+0x30/0x58/0x70 string 字段）反查
+   业务层调用者（发起点函数），或搜 oplog/`VerifyUserOpLog` 相关构造点；
+3. 服务器端 -2 IA 的「值」假设验证：对同一申请**先 getcontact 拉取申请人资料再 accept**、
+   或 scene=15（扫码）特判材料。

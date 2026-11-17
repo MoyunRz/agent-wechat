@@ -77,7 +77,16 @@ pub fn encoded(
         supplied_text(&input.ticket, MAX_TICKET_BYTES),
         "Invalid contact-request ticket"
     );
-    let base = p::bytes(1, &crate::wire::base_request(&state.device, state.uin, 0)?);
+    let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
+    // BaseRequest.task override: official12/official13 carry the task values
+    // noted in the spec under the official shape; task1/task12 apply the same
+    // override to the grey-scale field9 shape.
+    let task = match probe.as_str() {
+        "official12" | "task1" => 1,
+        "official13" | "task12" => 12,
+        _ => 0,
+    };
+    let base = p::bytes(1, &crate::wire::base_request(&state.device, state.uin, task)?);
     let entry = p::message(&[
         p::bytes(1, input.encrypt_username.as_bytes()),
         p::bytes(2, input.ticket.as_bytes()),
@@ -86,7 +95,6 @@ pub fn encoded(
     // official fill code writes opcode=1, scene=1, and carries the applicant
     // material as repeated field4 VerifyUser{field1=username} entries — not
     // the field9 VerifyUserInfo{encryptusername,ticket} template.
-    let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
     if probe.starts_with("official") {
         let identity = match probe.as_str() {
             // official10: the fill function's arg3 could be the logged-in
@@ -110,35 +118,110 @@ pub fn encoded(
                 &p::message(&[p::bytes(1, input.ticket.as_bytes())])?,
             ));
         }
-        if matches!(probe.as_str(), "official6" | "official7" | "official8" | "official9") {
+        if matches!(
+            probe.as_str(),
+            "official6" | "official7" | "official8" | "official9" | "official11" | "official14"
+            | "official15" | "official17" | "official18" | "official19"
+        ) {
             // VerifyUser.f14 is the shared two-string message; its first string
             // carries the serialized six-field business object that the official
             // fill code serializes from the request params. Field numbers are the
             // working hypothesis (1..=6 in {int,string,int,string,int,string}
             // order).
-            let biz = p::message(&[
+            // official11/official18: the stored ticket carries the
+            // "v2_ticket@str=" envelope prefix; the business entry may expect
+            // the decoded inner value.
+            let biz_ticket = if probe == "official11" || probe == "official18" {
+                let stripped = input
+                    .ticket
+                    .strip_prefix("v2_ticket@str=")
+                    .unwrap_or(&input.ticket);
+                stripped.strip_suffix('@').unwrap_or(stripped)
+            } else {
+                input.ticket.as_str()
+            };
+            let mut biz_fields = vec![
                 p::uint(1, 1),
-                p::bytes(2, input.ticket.as_bytes()),
+                p::bytes(2, biz_ticket.as_bytes()),
                 p::uint(3, u64::from(input.scene)),
                 p::bytes(4, input.encrypt_username.as_bytes()),
-            ])?;
-            vu_fields.push(p::bytes(
-                14,
-                &p::message(&[p::bytes(1, &biz)])?,
-            ));
+            ];
+            // official15: complete the six-field object with the two trailing
+            // {int,string} entries (params+0x50/+0x58); the int is guessed 0
+            // and the string the applicant username.
+            if probe == "official15" {
+                biz_fields.push(p::uint(5, 0));
+                biz_fields.push(p::bytes(6, identity.as_bytes()));
+            }
+            let biz = p::message(&biz_fields)?;
+            // official17/18: f14 is micromsg.SKBuiltinBuffer_t{iLen=1,
+            // pBuffer=2} per the Linux ELF class serialize 0x7ba67f0 — not a
+            // two-string message. The serialized business object carries its
+            // own byte length in field1.
+            if probe == "official17" || probe == "official18" || probe == "official19" {
+                vu_fields.push(p::bytes(
+                    14,
+                    &p::message(&[p::uint(1, biz.len() as u64), p::bytes(2, &biz)])?,
+                ));
+            } else {
+                vu_fields.push(p::bytes(
+                    14,
+                    &p::message(&[p::bytes(1, &biz)])?,
+                ));
+            }
         }
         let vu = p::message(&vu_fields)?;
-        let mut fields = vec![base, p::uint(2, 1), p::bytes(4, &vu)];
+        // official14 crosses the official field4 shape with the capture-side
+        // opcode/scene pair (3/15): the session capture shows the submitted
+        // request carrying 3/15 while the fill code writes 1/1, so the hub
+        // layer may overwrite both literals before submission.
+        let opcode_field = if probe == "official14" || probe == "official19" { 3 } else { 1 };
+        let mut fields = vec![base, p::uint(2, opcode_field), p::bytes(4, &vu)];
         // official8 records the scene value noted in the Windows-side session
         // log (-1) instead of the +1 literal seen in the Linux fill code.
         match probe.as_str() {
             "official8" => fields.push(p::int32(3, -1)),
+            // official16: keep the fill opcode=1 but echo the request's scene.
+            "official14" | "official16" | "official19" => fields.push(p::uint(3, 15)),
             _ => fields.push(p::uint(3, 1)),
         }
-        if probe == "official5" || probe == "official9" {
+        if probe == "official5"
+            || probe == "official9"
+            || probe == "official11"
+            || probe == "official14"
+            || probe == "official17"
+            || probe == "official18"
+            || probe == "official19"
+        {
             fields.push(p::uint(7, 1));
         }
         return p::message(&fields);
+    }
+    // official20-23: opcode=3 accept variants over the field9 VerifyUserInfo
+    // carrier (the opcode=3 handler rejects field4 shapes at the envelope
+    // layer, and VerifyUserInfo only has the two string fields). Each mode
+    // permutes the ticket/identity placement and the ticket envelope prefix.
+    if matches!(probe.as_str(), "official20" | "official21" | "official22" | "official23") {
+        let stripped_ticket = {
+            let stripped = input
+                .ticket
+                .strip_prefix("v2_ticket@str=")
+                .unwrap_or(&input.ticket);
+            stripped.strip_suffix('@').unwrap_or(stripped)
+        };
+        let (first, second) = match probe.as_str() {
+            "official20" => (input.ticket.as_str(), input.encrypt_username.as_str()),
+            "official21" => (input.username.as_str(), input.ticket.as_str()),
+            "official22" => (input.encrypt_username.as_str(), stripped_ticket),
+            _ => (stripped_ticket, input.encrypt_username.as_str()),
+        };
+        let entry = p::message(&[p::bytes(1, first.as_bytes()), p::bytes(2, second.as_bytes())])?;
+        return p::message(&[
+            base,
+            p::uint(2, 3),
+            p::uint(3, 15),
+            p::bytes(9, &entry),
+        ]);
     }
     // Grey-scale probe: WX_VERIFY_PROBE switches request shapes while hunting
     // the envelope -2 rejection. Modes: no-payload (frame fields only),
@@ -153,11 +236,6 @@ pub fn encoded(
         "scene1" => 1,
         "scene14" => 14,
         _ => input.scene,
-    };
-    let task = match probe.as_str() {
-        "task1" => 1,
-        "task12" => 12,
-        _ => 0,
     };
     let mut fields = vec![
         base,

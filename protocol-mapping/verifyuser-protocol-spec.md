@@ -232,3 +232,44 @@ req.field7 += <int>;                   // repeated int32，容量增长 ×2 min 
   3. `baseline2+biz`：VerifyUser.field14 = {string=ticket}（若服务端要求）
   4. `baseline2+field7`：field7=[1] / [scene 相关 int]
   - 响应 ret=0 或出现**非 -2** 的业务错误码即证明形状假设收敛；再迭代字段。
+
+### 10.6 0x38B 尾类字段号实锤 + f14 类型修正（2026-11-17 第二轮，objdump 静态取证 @10.7.1.29）
+
+> 工具链：SSH 到 10.7.1.29（Ubuntu 22.04，用户 toon），二进制 `/home/toon/reverse/wechat-root/opt/wechat/wechat`
+>（181,208,032 B，段映射与 §10 一致）。PIE 全量 RELA：vtable 槽文件内容为 0，真实指针在
+> `.rela.dyn` 的 R_X86_64_RELATIVE addend（基址 0xc0d8，线性扫描解析）。
+
+**尾类（0x38B 级，vptr `0xa9c55d0`）serialize `0x7f280f0` [硬]**：
+
+| hasbit | 字段号 | wire | 对象偏移 | Write helper |
+|---|---|---|---|---|
+| bit0 @0x30 | 1 | varint | +0x10 int32 | 8f59d00 |
+| bit1 | 2 | len-delim | +0x8 string | 8f59ed0 |
+| bit2 | 3 | varint | +0x14 int32 | 8f59d00 |
+| bit3 | 4 | len-delim | +0x18 string | 8f59ed0 |
+| bit4 | 5 | varint | +0x28 int32 | 8f59d00 |
+| bit5 | 6 | len-delim | +0x20 string | 8f59ed0 |
+
+→ **六字段号假设 1..=6 成立**；helper 证实 8f59d00=WriteVarint（tag=field<<3|0）、8f59ed0=WriteString（tag=field<<3|2）。
+
+**VerifyUser.f14 类型 = `micromsg.SKBuiltinBuffer_t` [硬]**：fill `0x69200e0` @0x69203d5 构造 0x20 对象（ctor
+`0x7ba6400`，vptr `0xa9987f8+0x10`）；其 serialize `0x7ba67f0`/parse `0x7ba6680` 确证布局
+`{1: uint32 iLen @+0x10 (varint), 2: bytes pBuffer @+0x8 (len-delim), hasbit @+0x18}`；
+GetFullName 输出 26 字节类名 `micromsg.SKBuiltinBuffer_t`（@0xda5b76）。fill 序列：
+`hasbit|=2 → pBuffer ← serialize(0x38B biz)`，随后 `hasbit|=1 → iLen ← pBuffer 字节长度`。
+→ §10.4 的「field14_msg = { string = serialize(biz) }」**两 string 解读作废**，wire 形状为
+`f14 = {1: <biz 长度>, 2: <biz 序列化字节>}`（SKBuiltinBuffer_t 长度前缀惯用法）。
+VerifyUser.parse `0x7f22bb0` 内 f14 tag 分支调用 ctor `0x7ba6400`——客户端 4.1.13 自洽。
+
+**协程链全貌 [硬]**：协程 A `0x76bde20`（日志上下文 `mmui::ContactHeadView`，`__LINE__=0x7b5`，
+文件/函数名字符串混淆）分配 0x160 frame（vtable `0xa966378`）：frame+0x10 ← A.arg1+0x8（username
+string 拷贝）、frame+0x28 ← `0x76755e0` 纯拷贝构造自 A.arg1+0x20（**布局与 params 完全一致**
+{int@0x0,string@0x8,int@0x28,string@0x30,int@0x50,string@0x58}）、frame+0xa0 ← 72d1b90 对象；
+resume `0x76be360` → fill `0x69200e0`（username=frame+0x10、params=frame+0x28、items=栈上 72d2ac0
+产物）；fill 后无 opcode/scene 覆盖，直接组装回调对象提交。
+
+**§10.4 定性修正 [硬]**：`0x69200e0` 的日志上下文是 `mmui::ContactHeadView`（联系人资料页）——
+该 fill 是**主动发起好友申请**（opcode=1 = request/verify 语义）的构造，**不是 accept**。§10.5
+「accept 用 field4」的推论随之作废；「opcode accept=3」的 Windows 推断重新有效。全二进制无
+opcode=3 立即数写点 → accept 请求的 opcode 是运行时变量，官方 accept 构造点尚未定位（候选：
+oplog 路线 / 服务器端独立 handler / 4.1.13 客户端与服务器 proto 不一致）。
