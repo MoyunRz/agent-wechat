@@ -317,6 +317,7 @@ mod tests {
         .unwrap();
         assert_eq!(loaded.profile(None, None).unwrap().0, "archive");
         assert!(loaded.settings.servers.is_empty());
+        #[cfg(unix)]
         assert_eq!(std::fs::metadata(&file.path).unwrap().mode() & 0o777, 0o600);
     }
 }

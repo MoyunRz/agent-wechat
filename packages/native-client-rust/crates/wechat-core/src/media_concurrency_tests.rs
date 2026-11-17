@@ -260,6 +260,56 @@ fn queue(core: &Core, n: usize) -> String {
         .unwrap();
     job
 }
+fn queue_download(
+    core: &Core,
+    n: usize,
+    kind: &str,
+    variant: &str,
+    descriptor: MediaDescriptor,
+) -> String {
+    let id = format!("{kind}-{n}");
+    let asset: MediaAsset = serde_json::from_value(json!({
+        "id":id,"accountId":"one","messageId":null,"kind":kind,"variant":variant,"actualVariant":null,
+        "state":"pending","contentType":null,"byteLength":null,"sha256":null,"filename":null,"expiresAt":null,
+        "reason":null,"retryable":true,"jobId":null,"contentUrl":null,"animationFrames":null,"officialWriteback":"unsupported","preview":null
+    })).unwrap();
+    let plan = DownloadPlan::Cdn { descriptor };
+    let plan = core
+        .vault
+        .seal(
+            "one",
+            &format!("plan:{id}"),
+            &serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+    core.store
+        .put_media_asset(
+            "one",
+            &MediaAssetRecord {
+                id: id.clone(),
+                message_id: None,
+                kind: kind.into(),
+                variant: variant.into(),
+                metadata: serde_json::to_value(asset).unwrap(),
+                plan,
+                payload: None,
+            },
+        )
+        .unwrap();
+    let job = format!("download-{n}");
+    core.store
+        .create_media_job(
+            "one",
+            &job,
+            &job,
+            &digest(job.as_bytes()),
+            "download",
+            &json!({"assetId":id}),
+            b"",
+        )
+        .unwrap();
+    job
+}
 fn release(upstream: &PausedDownloads) {
     let (lock, signal) = &*upstream.release;
     *lock.lock().unwrap() = true;

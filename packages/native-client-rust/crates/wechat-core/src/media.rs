@@ -465,63 +465,6 @@ impl Core {
                 }
             })
     }
-    /// Decrypt an upload into a new private file at `path`, checking its length
-    /// and SHA-256 before returning. Memory stays bounded for any upload size.
-    /// On any failure the file is removed, so nothing unverified remains.
-    pub(crate) fn source_to_file(
-        &self,
-        account: &str,
-        id: &str,
-        path: &std::path::Path,
-    ) -> Result<OwnedMediaSource> {
-        use sha2::{Digest, Sha256};
-        struct Hashing<W> {
-            inner: W,
-            hash: Sha256,
-            length: u64,
-        }
-        impl<W: std::io::Write> std::io::Write for Hashing<W> {
-            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-                let written = self.inner.write(data)?;
-                self.hash.update(&data[..written]);
-                self.length += written as u64;
-                Ok(written)
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                self.inner.flush()
-            }
-        }
-        let result = (|| -> Result<OwnedMediaSource> {
-            let (meta, mut reader) = self.store.media_source_reader(account, id)?;
-            let file = wechat_platform::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)?;
-            let mut output = Hashing {
-                inner: std::io::BufWriter::new(file),
-                hash: Sha256::new(),
-                length: 0,
-            };
-            self.vault.open_media_stream(
-                account,
-                &format!("source:{id}"),
-                &mut reader,
-                &mut output,
-            )?;
-            std::io::Write::flush(&mut output)?;
-            ensure!(
-                output.length == meta.byte_length
-                    && format!("{:x}", output.hash.finalize()) == meta.sha256,
-                "source_integrity_failed"
-            );
-            Ok(meta)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(path);
-        }
-        result
-    }
     fn source_bytes(&self, account: &str, id: &str) -> Result<(OwnedMediaSource, Vec<u8>)> {
         let (meta, sealed) = self.store.media_source(account, id)?;
         let mut opened = self
@@ -2052,14 +1995,8 @@ impl Core {
                         "link_thumbnail_size_limit"
                     );
                 }
-                let actual = if media
-                    .substituted_filetype
-                    .is_none_or(|v| v == descriptor.quality.filetype())
-                {
-                    Some(asset.variant)
-                } else {
-                    None
-                };
+                let actual =
+                    received_video_variant(asset.kind, asset.variant, descriptor.quality, &media);
                 ensure!(actual == Some(asset.variant), "unsupported_media_variant");
                 official_writeback = if asset.official_writeback == "unsupported" {
                     None
@@ -2147,50 +2084,6 @@ impl Core {
                     Some(MediaVariant::Normal),
                     frames,
                 )
-            }
-            DownloadPlan::Channels { object_id, nonce } => {
-                let post = wechat_protocol::ChannelsPost { object_id, nonce };
-                let mut state = self.account_state(account)?;
-                let upstream = self.account_upstream(account)?;
-                let fence = permit
-                    .as_ref()
-                    .map(|_| self.media_authorization_fence(account))
-                    .transpose()?;
-                let before = serde_json::to_vec(&state)?;
-                let fetched = cdn_transfer(permit.as_deref_mut(), self, account, || {
-                    let mut checkpoint = || match &fence {
-                        Some(fence) => self.resume_media_state(account, id, fence).map(|_| ()),
-                        None => self.authorize_media_record(
-                            account,
-                            &self.store.media_asset(account, asset_id)?,
-                        ),
-                    };
-                    upstream.fetch_channels_video(
-                        &mut state,
-                        &post,
-                        wechat_protocol::media::MAX_CHANNELS_VIDEO_BYTES,
-                        &mut checkpoint,
-                        &progress,
-                    )
-                });
-                if let Some(fence) = &fence {
-                    let current = self.resume_media_state(account, id, fence)?;
-                    // A push may refresh cookies while the transfer is in flight.
-                    if serde_json::to_vec(&current)? != before {
-                        state = current;
-                    }
-                }
-                self.save_state(account, &state)?;
-                let video = fetched?;
-                let (mime, frames) =
-                    validate_asset_bytes(MediaKind::Video, MediaVariant::Normal, &video.bytes)
-                        .map_err(|_| {
-                            anyhow::Error::new(wechat_protocol::media::ChannelsDownloadFailure {
-                                check: "container",
-                                facts: video.facts.clone(),
-                            })
-                        })?;
-                (video.bytes, mime, Some(MediaVariant::Normal), frames)
             }
             DownloadPlan::Sticker { descriptor } => {
                 let mut state = self.account_state(account)?;
@@ -4336,8 +4229,7 @@ fn original_image_variant(bytes: &[u8], decoded: &image::DynamicImage) -> Result
     let edge = decoded
         .width()
         .max(decoded.height())
-        .min(IMAGE_ORIGINAL_MAX_EDGE)
-        .max(1);
+        .clamp(1, IMAGE_ORIGINAL_MAX_EDGE);
     let resized = decoded.thumbnail(edge, edge).to_rgb8();
     for quality in [95, 92, 88, 82, 75] {
         let mut out = vec![];
@@ -4429,7 +4321,7 @@ fn fit_jpeg(
         ImageVariantSizing::DownscaleOnly => image.width().max(image.height()),
     };
     for edge in [max_edge, max_edge / 2, max_edge / 4, max_edge / 8] {
-        let edge = edge.max(1).min(input_edge);
+        let edge = edge.clamp(1, input_edge);
         let resized = image.thumbnail(edge, edge).to_rgb8();
         for quality in [85, 70, 55, 40] {
             let mut bytes = vec![];

@@ -2624,6 +2624,7 @@ mod tests {
         assert_eq!(v, json!({"error":{"code":"profile_keys_missing"}}));
     }
     #[test]
+    #[cfg(unix)]
     fn token_file_is_private_persistent_and_never_replaced_on_failure() {
         let t = tempfile::tempdir().unwrap();
         let p = t.path().join("private/token");

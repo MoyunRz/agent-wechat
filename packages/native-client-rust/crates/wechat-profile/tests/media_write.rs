@@ -244,6 +244,7 @@ fn publication_refuses_symlinks_and_schema_extensions() {
     let keys = KeyFile::empty("account");
     let o = options();
     let bytes = b"payload";
+    #[cfg(unix)]
     let hash = hex::encode(Sha256::digest(bytes));
     #[cfg(unix)]
     {

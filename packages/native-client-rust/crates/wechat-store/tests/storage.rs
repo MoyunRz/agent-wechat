@@ -1,3 +1,4 @@
+#![cfg(unix)]
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::{fs, path::Path};
 use wechat_store::{

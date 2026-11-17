@@ -337,15 +337,18 @@ mod tests {
                 .unwrap(),
             before
         );
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(root.join("hostredirect.ini"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(root.join("hostredirect.ini"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
     #[test]
     fn routing_preserves_other_services_and_selected_ini_and_refuses_changed_sources() {
@@ -403,10 +406,13 @@ mod tests {
         assert!(std::fs::read_to_string(root.join("host-redirect.xml"))
             .unwrap()
             .contains("<!--unknown--><mapping src='localhost' redirect='localhost'/>"));
-        let alias = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(temp.path().join(".xwechat"), alias.path().join(".xwechat"))
-            .unwrap();
-        assert!(plan_routing(alias.path(), "sglong.wechat.com", "sgshort.wechat.com").is_err());
+        #[cfg(unix)]
+        {
+            let alias = tempfile::tempdir().unwrap();
+            std::os::unix::fs::symlink(temp.path().join(".xwechat"), alias.path().join(".xwechat"))
+                .unwrap();
+            assert!(plan_routing(alias.path(), "sglong.wechat.com", "sgshort.wechat.com").is_err());
+        }
     }
     #[test]
     fn saved_routing_uses_selected_native_files_and_rejects_unsafe_or_ambiguous_pairs() {

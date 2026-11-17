@@ -880,14 +880,6 @@ pub fn publish_cache_payload(
     )
 }
 
-pub(crate) fn apply_checked_cache_file(
-    location: &ProfileLocation,
-    relative: &str,
-    bytes: &[u8],
-    max: usize,
-) -> Result<bool> {
-    apply_checked_cache_payload(location, relative, MediaPayload::Bytes(bytes), None, max)
-}
 /// Publish `payload` at `relative` unless that path exists. An existing file
 /// must hold the same bytes. With `expected_sha256`, the copy is checked
 /// before it gets its final name, so a file source that changes mid-copy is

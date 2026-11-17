@@ -2909,6 +2909,8 @@ dependencies = [
  "libc",
  "md-5",
  "serde",
+ "serde_json",
+ "sha2",
  "tempfile",
  "wechat-platform",
 ]
