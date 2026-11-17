@@ -151,6 +151,15 @@ impl Core {
                 }
                 Ok(None) => self.store.clear_runtime(account, &key)?,
                 Err(error) if error.to_string() == "media_queue_full" => break,
+                Err(error)
+                    if matches!(
+                        error.to_string().as_str(),
+                        "media_backoff" | "media_circuit_open"
+                    ) =>
+                {
+                    // Transient degradation: keep the pending request for a
+                    // later cycle without spending its attempt budget.
+                }
                 Err(_) => {
                     pending.attempts = pending.attempts.saturating_add(1);
                     if pending.attempts >= 3 {

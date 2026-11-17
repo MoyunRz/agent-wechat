@@ -563,6 +563,19 @@ impl Core {
         Ok(public_job(account, &row))
     }
     pub fn retry_media_job(self: &Arc<Self>, account: &str, id: &str) -> Result<MediaJob> {
+        let current = self.store.media_job(account, id)?;
+        if current.kind == "download" {
+            // Retry pacing: a failing download waits out its backoff and the
+            // account-level CDN circuit before another request is issued.
+            let asset_id = current.data["assetId"]
+                .as_str()
+                .context("media_asset_not_found")?;
+            ensure!(
+                !self.media_fail_backoff_active(account, asset_id)?,
+                "media_backoff"
+            );
+            ensure!(!self.media_cdn_circuit_open(account)?, "media_circuit_open");
+        }
         let row = self.store.retry_media_job(account, id)?;
         self.spawn_media_worker(account, id);
         Ok(public_job(account, &row))
@@ -1017,6 +1030,14 @@ impl Core {
                 asset.reason.unwrap_or_else(|| "unsupported_media".into())
             );
         }
+        if asset.state != "available" || asset.actual_variant != Some(asset.variant) {
+            // A failing download must not be re-requested on every call.
+            ensure!(
+                !self.media_fail_backoff_active(account, &asset.id)?,
+                "media_backoff"
+            );
+            ensure!(!self.media_cdn_circuit_open(account)?, "media_circuit_open");
+        }
         let key = format!("download:{}", asset.id);
         let id = format!("job_{}", uuid::Uuid::new_v4());
         let hash = digest(asset.id.as_bytes());
@@ -1204,6 +1225,7 @@ impl Core {
         self.authorize_media_record(account, &self.store.media_asset(account, id)?)?;
         self.store
             .save_media_asset(account, id, &serde_json::to_value(&asset)?, Some(&sealed))?;
+        self.clear_media_download_failure(account, id)?;
         Ok(asset)
     }
     fn cache_wxgf_preview(
@@ -1387,6 +1409,111 @@ impl Core {
             .map(|fence| self.resume_media_state(account, id, fence))
             .transpose()
     }
+    // Download failure degradation: one failing CDN object must not be
+    // re-requested on every retry, and an account whose downloads keep
+    // failing stops hammering the CDN for a while instead.
+    const MEDIA_FAIL_BASE_SECS: u32 = 60;
+    const MEDIA_FAIL_MAX_SECS: u32 = 1800;
+    const MEDIA_CDN_FAIL_WINDOW_SECS: u32 = 600;
+    const MEDIA_CDN_FAIL_LIMIT: u32 = 10;
+    const MEDIA_CDN_FAILS_KEY: &str = "media-cdn-fails";
+
+    /// True while a failed download keeps this asset's retry gated.
+    pub(crate) fn media_fail_backoff_active(&self, account: &str, asset_id: &str) -> Result<bool> {
+        let Some(bytes) = self
+            .store
+            .runtime(account, &format!("media-fail:{asset_id}"))?
+        else {
+            return Ok(false);
+        };
+        let until = std::str::from_utf8(&bytes)?
+            .trim()
+            .split(' ')
+            .next()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_default();
+        Ok(wechat_protocol::wire::unix_time()? < until)
+    }
+    /// Pace one failed download attempt per asset and feed the account-level
+    /// CDN failure circuit.
+    pub(crate) fn record_media_download_failure(
+        &self,
+        account: &str,
+        asset_id: &str,
+    ) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        let key = format!("media-fail:{asset_id}");
+        let attempts = self
+            .store
+            .runtime(account, &key)?
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes).ok().and_then(|text| {
+                    text.trim()
+                        .split(' ')
+                        .nth(1)
+                        .and_then(|value| value.parse::<u32>().ok())
+                })
+            })
+            .unwrap_or_default();
+        let delay = Self::MEDIA_FAIL_BASE_SECS
+            .saturating_mul(1u32 << attempts.min(5))
+            .min(Self::MEDIA_FAIL_MAX_SECS);
+        self.store.put_runtime(
+            account,
+            &key,
+            format!("{} {}", now.saturating_add(delay), attempts + 1).as_bytes(),
+        )?;
+        let window = now / Self::MEDIA_CDN_FAIL_WINDOW_SECS;
+        let count = self
+            .store
+            .runtime(account, Self::MEDIA_CDN_FAILS_KEY)?
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes).ok().and_then(|text| {
+                    let mut parts = text.trim().split(' ');
+                    Some((
+                        parts.next()?.parse::<u32>().ok()?,
+                        parts.next()?.parse::<u32>().ok()?,
+                    ))
+                })
+            })
+            .filter(|(recorded, _)| *recorded == window)
+            .map(|(_, count)| count)
+            .unwrap_or_default();
+        self.store.put_runtime(
+            account,
+            Self::MEDIA_CDN_FAILS_KEY,
+            format!("{window} {}", count + 1).as_bytes(),
+        )
+    }
+
+    /// A verified download proves the CDN path is healthy again.
+    pub(crate) fn clear_media_download_failure(&self, account: &str, asset_id: &str) -> Result<()> {
+        self.store
+            .clear_runtime(account, &format!("media-fail:{asset_id}"))?;
+        self.store.clear_runtime(account, Self::MEDIA_CDN_FAILS_KEY)
+    }
+
+    /// True while the account's download failures exceeded the window budget.
+    pub(crate) fn media_cdn_circuit_open(&self, account: &str) -> Result<bool> {
+        let now = wechat_protocol::wire::unix_time()?;
+        Ok(self
+            .store
+            .runtime(account, Self::MEDIA_CDN_FAILS_KEY)?
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes).ok().and_then(|text| {
+                    let mut parts = text.trim().split(' ');
+                    Some((
+                        parts.next()?.parse::<u32>().ok()?,
+                        parts.next()?.parse::<u32>().ok()?,
+                    ))
+                })
+            })
+            .is_some_and(|(window, count)| {
+                window == now / Self::MEDIA_CDN_FAIL_WINDOW_SECS
+                    && count >= Self::MEDIA_CDN_FAIL_LIMIT
+            }))
+    }
+
     fn fail_media_job(&self, account: &str, id: &str, code: &str) -> Result<()> {
         let mut row = self.store.media_job(account, id)?;
         if matches!(
@@ -1426,6 +1553,15 @@ impl Core {
             );
         row.error_code = Some(code.into());
         self.store.save_media_job(account, &row)?;
+        if row.kind == "download"
+            && matches!(row.state.as_str(), "failed" | "expired" | "unsupported")
+        {
+            // Terminal download failure: pace later attempts on this asset
+            // and feed the account-level CDN circuit.
+            if let Some(asset_id) = row.data["assetId"].as_str() {
+                let _ = self.record_media_download_failure(account, asset_id);
+            }
+        }
         if row.kind == "send" {
             let _ = self.project_media_send_receipts(account, id);
         }
@@ -3890,6 +4026,56 @@ mod storage_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_failures_back_off_per_asset_and_open_the_account_circuit() {
+        let (_dir, core) = test_core();
+        assert!(!core.media_fail_backoff_active("one", "asset-1").unwrap());
+        assert!(!core.media_cdn_circuit_open("one").unwrap());
+        core.record_media_download_failure("one", "asset-1")
+            .unwrap();
+        assert!(core.media_fail_backoff_active("one", "asset-1").unwrap());
+        assert!(!core.media_cdn_circuit_open("one").unwrap());
+        // Nine more failures in the same window open the account circuit.
+        for _ in 0..9 {
+            core.record_media_download_failure("one", "asset-2")
+                .unwrap();
+        }
+        assert!(core.media_cdn_circuit_open("one").unwrap());
+        // A verified download clears both the asset backoff and the circuit.
+        core.clear_media_download_failure("one", "asset-1").unwrap();
+        assert!(!core.media_fail_backoff_active("one", "asset-1").unwrap());
+        assert!(!core.media_cdn_circuit_open("one").unwrap());
+    }
+
+    #[test]
+    fn failed_download_jobs_record_backoff_and_gate_retries() {
+        let (_dir, core) = test_core();
+        let (row, created) = core
+            .store
+            .create_media_job(
+                "one",
+                "job-fail-1",
+                "download:asset-9",
+                &"0".repeat(64),
+                "download",
+                &json!({"assetId":"asset-9","completedBytes":0}),
+                b"",
+            )
+            .unwrap();
+        assert!(created);
+        assert_eq!(row.kind, "download");
+        core.fail_media_job("one", "job-fail-1", "transport_unavailable")
+            .unwrap();
+        assert!(core.media_fail_backoff_active("one", "asset-9").unwrap());
+        // A retry inside the backoff window is refused without a new attempt.
+        assert!(core
+            .retry_media_job("one", "job-fail-1")
+            .unwrap_err()
+            .to_string()
+            .contains("media_backoff"));
+    }
+
     #[test]
     fn persisted_cdn_download_diagnostics_ignore_response_context_and_preserve_reason() {
         use wechat_protocol::media::{
