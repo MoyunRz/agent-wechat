@@ -5,7 +5,8 @@ migration registry/V002__account_settings_tokens.sql | sha256 98c05eac7253b8b3 |
 migration registry/V003__removed_accounts.sql | sha256 8e4f0d619535bf4d | -
 migration registry/V004__media_download_settings.sql | sha256 aa9714c11e955b72 | -
 migration registry/V005__proactive_cache_settings.sql | sha256 048078f2834437c1 | -
-schema version | 5 | -
+migration registry/V006__openclaw_configs.sql | sha256 aa4dba7ca41179a6 | -
+schema version | 6 | -
 table access_tokens | CREATE TABLE access_tokens(id TEXT PRIMARY KEY,name TEXT NOT NULL,digest TEXT NOT NULL,accounts_json TEXT NOT NULL,scopes_json TEXT NOT NULL,expires_at INTEGER,revoked INTEGER NOT NULL DEFAULT 0) | -
 table access_tokens.accounts_json | TEXT, not null | -
 table access_tokens.digest | TEXT, not null | -
@@ -30,3 +31,8 @@ table accounts.storage_mode | TEXT, not null | -
 table metadata | CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL) | -
 table metadata.key | TEXT, primary key 1 | -
 table metadata.value | TEXT, not null | -
+table openclaw_configs | CREATE TABLE openclaw_configs( account_id TEXT PRIMARY KEY REFERENCES accounts(id), config TEXT NOT NULL, updated_at INTEGER NOT NULL ) | -
+table openclaw_configs.account_id | TEXT, primary key 1 | -
+table openclaw_configs.account_id foreign key #0 | references accounts(id), on delete NO ACTION | -
+table openclaw_configs.config | TEXT, not null | -
+table openclaw_configs.updated_at | INTEGER, not null | -

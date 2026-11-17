@@ -2471,6 +2471,30 @@
         ],
         "type": "object"
       },
+      "NativeOfflineModeRequest": {
+        "additionalProperties": false,
+        "description": "Request to turn the account's offline mode on or off.",
+        "properties": {
+          "enabled": {
+            "description": "True to admit no WeChat server request and serve reads from the local\ncache; false to allow connections again. Enabling also disconnects the\nlive connection; disabling does not reconnect by itself.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "NativeOpenClawConfigRequest": {
+        "additionalProperties": false,
+        "description": "Request to store or clear one account's OpenClaw configuration document.",
+        "properties": {
+          "config": {
+            "description": "The account's OpenClaw configuration as a JSON object, or null to remove\nthe stored copy and fall back to the OpenClaw host config. Each WeChat\naccount keeps its own copy, so different users configure different\nOpenClaw policies."
+          }
+        },
+        "type": "object"
+      },
       "NativeOperation": {
         "description": "A background operation such as signing in or out, refreshing contacts or changing a group. Poll\nit by ID until it finishes.",
         "properties": {
@@ -8192,6 +8216,156 @@
           {
             "$ref": "#/components/schemas/NativeOperation"
           }
+        ]
+      }
+    },
+    "/v1/accounts/{a}/offline": {
+      "post": {
+        "operationId": "setOfflineMode",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeOfflineModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "login"
+            ]
+          }
+        ],
+        "summary": "Turn the account's offline mode on or off. While it is on, no WeChat server request is admitted and reads come from the local cache; enabling also disconnects the live connection.",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/openclaw-config": {
+      "get": {
+        "operationId": "getOpenClawConfig",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Show one account's stored OpenClaw configuration document, or null when the account falls back to the OpenClaw host config.",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "put": {
+        "operationId": "setOpenClawConfig",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeOpenClawConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admin"
+            ]
+          }
+        ],
+        "summary": "Store or clear one account's OpenClaw configuration document. Each WeChat account keeps its own copy, so different users configure different OpenClaw policies.",
+        "tags": [
+          "accounts"
         ]
       }
     },

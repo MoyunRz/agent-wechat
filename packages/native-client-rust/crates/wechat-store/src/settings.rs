@@ -93,7 +93,7 @@ impl Store {
             .map(|(limit, kinds)| (Some(limit), Some(ProactiveCacheKinds::from_column(kinds))))
             .unwrap_or((None, Some(defaults.proactive_cache.unwrap_or_default())));
         Ok(AccountSettings {
-            auto_download_max_bytes: limit.unwrap_or_else(|| defaults.auto_download_max_bytes),
+            auto_download_max_bytes: limit.unwrap_or(defaults.auto_download_max_bytes),
             proactive_cache,
         })
     }
@@ -103,7 +103,7 @@ impl Store {
         }
         // Kinds omitted in the request keep the values this account already has.
         let kinds = match &settings.proactive_cache {
-            Some(kinds) => kinds.clone(),
+            Some(kinds) => *kinds,
             None => self
                 .account_settings(account)?
                 .proactive_cache
