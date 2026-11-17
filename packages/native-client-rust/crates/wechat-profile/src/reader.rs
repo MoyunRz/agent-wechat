@@ -465,6 +465,30 @@ impl ProfileReader {
                 return Err(ProfileError::ResourceLimit);
             }
         }
+        // 官方客户端把「无联系人资料会话」的标题存在 session.db 的
+        // SessionNoContactInfoTable 里（如 @openim 品牌客服的显示名）。
+        // 已有联系人行的 username 不被覆盖；旧版布局缺表时跳过。
+        if let Ok(session_rel) = self.role("session.db", "threads") {
+            let session = self.snapshot.open(session_rel)?;
+            let Ok(mut titles) =
+                session.prepare("SELECT username,session_title FROM SessionNoContactInfoTable")
+            else {
+                return Ok(out);
+            };
+            let Ok(mut title_rows) = titles.query([]) else {
+                return Ok(out);
+            };
+            while let Some(r) = title_rows.next()? {
+                let username: String = r.get(0)?;
+                let title: Option<String> = r.get(1)?;
+                if let Some(title) = title.filter(|t| !t.trim().is_empty()) {
+                    out.entry(username).or_insert(title);
+                }
+                if out.len() > 1_000_000 {
+                    return Err(ProfileError::ResourceLimit);
+                }
+            }
+        }
         Ok(out)
     }
     /// Capture complete history membership in one pass per shard. This reads

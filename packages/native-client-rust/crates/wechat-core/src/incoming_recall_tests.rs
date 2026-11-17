@@ -130,6 +130,34 @@ fn application_text_share_keeps_raw_content_and_roundtrips_quotes_until_recalled
 }
 
 #[test]
+fn service_card_title_is_projected_as_body() {
+    let (_temporary, store, core) = fixture();
+    let xml = "<msg><appmsg><type>21</type><title>你今天走了 6,235 步</title><des>Card body text</des><url>https://example.invalid/sport</url></appmsg></msg>";
+    let original = add(49, "peer", "synthetic_self", xml.as_bytes(), 123, 100);
+    retain_original(&core, &store, "service-card-original", original.clone());
+    core.apply_sync_command("one", &original, "service-card", "live")
+        .unwrap();
+    let message = first(&core);
+    assert_eq!(message["type"], 49);
+    assert_eq!(message["appMessageType"], 21);
+    assert_eq!(message["body"], "你今天走了 6,235 步");
+    assert!(message["link"].is_null());
+    // 引用尚未支持 subtype 21；标题投影独立于引用能力。
+    assert!(core
+        .resolve_quote(
+            "one",
+            "peer",
+            "Reply",
+            &crate::QuoteSendReference {
+                message_id: message["id"].as_str().unwrap().into(),
+                server_id: "123".into(),
+            },
+            "synthetic_self",
+        )
+        .is_err());
+}
+
+#[test]
 fn recall_api_derives_own_and_group_authors_from_existing_sync_receipts() {
     for (thread, from, to, body, author, direction) in [
         (

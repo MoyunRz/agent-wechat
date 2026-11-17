@@ -169,6 +169,9 @@ pub(crate) fn app_message(content: &str) -> Option<AppMessage> {
         .filter(|s| s.len() <= 16384 && !s.contains('\0'));
     let text = match subtype {
         1 | 57 => title.clone(),
+        // 服务号/收藏类图卡（微信运动等）：标题就是官方客户端展示的主体文本。
+        // 其余字段结构缺乏证据，不猜测；卡片样式渲染等证据补齐后再扩展。
+        21 => title.clone(),
         19 => forwarded_summary(app),
         // Supplied notice text only; this does not join live-location sharing.
         17 => crate::links::text(app, "title", 16384)
