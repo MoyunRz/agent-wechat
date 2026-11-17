@@ -210,11 +210,20 @@ function enc(value: string): string {
   return encodeURIComponent(value)
 }
 
-// 头像 blob 内存缓存：key 为 `accountId|username|version`；头像字节很小（~10KB 级），
+// 头像 blob 内存缓存：key 为 `accountId|username|version|epoch`；头像字节很小（~10KB 级），
 // 上限 256 条足够覆盖整个通讯录，超出后按插入顺序淘汰最旧的一条。
+// epoch 用于整批失效：daemon 重启后快照可能重出头像行（短暂撕裂曾把 A 的字节
+// 放进 B 的 username 下），重连时 bump epoch 强制全部头像重新校验一次。
 const AVATAR_CACHE_LIMIT = 256
+let avatarCacheEpoch = 0
 const avatarBlobCache = new Map<string, string>()
 const avatarBlobJobs = new Map<string, Promise<string | null>>()
+
+/** 失效全部头像缓存：换新 epoch，旧的在途请求写旧键不会污染新读取。 */
+export function invalidateAvatarCache(): void {
+  avatarCacheEpoch += 1
+  avatarBlobCache.clear()
+}
 
 // 消息媒体 blob 内存缓存（图片/语音/缩略图）：key 为 contentUrl；上限 120 条。
 // 完整视频字节较大，不走此缓存（MessageBubble 对视频直接调 loadMedia）。
@@ -374,6 +383,16 @@ export const wechatApi = {
       'POST',
       {},
       { 'Idempotency-Key': idempotencyKey('group-sync') },
+    )
+  },
+
+  /** 拉取一位联系人的权威资料（备注等受控字段），完成后资料事件流会驱动目录刷新。 */
+  refreshContactProfile(accountId: string, username: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/contacts/${enc(username)}/refresh`,
+      'POST',
+      {},
+      { 'Idempotency-Key': idempotencyKey('contact-refresh') },
     )
   },
 
@@ -567,7 +586,7 @@ export const wechatApi = {
    * 头像字节很小，缓存量上限内不做主动回收。
    */
   async loadAvatarCached(accountId: string, username: string, version = 0): Promise<string | null> {
-    const key = `${accountId}|${username}|${version}`
+    const key = `${accountId}|${username}|${version}|${avatarCacheEpoch}`
     const cached = avatarBlobCache.get(key)
     if (cached)
       return cached

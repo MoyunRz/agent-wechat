@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { dayKey, dayLabel } from '../format'
 import type { AccountSummary, LocalMessage, MessageMediaMap, Thread } from '../types'
 import Icon from './Icon.vue'
@@ -20,10 +20,14 @@ const emit = defineEmits<{
   loadOlder: []
   'at-bottom': []
   reply: [message: LocalMessage]
+  preview: [src: string]
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
 const stickToBottom = ref(true)
+
+/** 服务号/公众号（gh_）消息流：统一宽度卡片布局，无头像与输入框。 */
+const cardLayout = computed(() => (props.thread?.peerId ?? '').trim().startsWith('gh_'))
 
 function onScroll(): void {
   const el = scroller.value
@@ -147,13 +151,14 @@ defineExpose({
 
 <template>
   <div ref="scroller" class="message-scroll scrollbar-thin" @scroll.passive="onScroll">
-    <div v-if="!thread" class="message-empty">
-      <span class="empty-icon"><Icon name="message" :size="28" /></span>
-      <p>选择一个聊天</p>
-      <span>从左侧会话列表开始</span>
+    <div v-if="!thread" class="welcome-screen">
+      <span class="welcome-logo"><Icon name="message" :size="34" /></span>
+      <h2>Agent WeChat</h2>
+      <p class="welcome-slogan">面向人与 AI 智能体的开源微信客户端</p>
+      <span class="welcome-hint">从左侧会话列表选择一个聊天开始</span>
     </div>
 
-    <div v-else class="message-inner">
+    <div v-else class="message-inner" :class="{ 'official-feed': cardLayout }">
       <button
         v-if="hasMore"
         class="load-older"
@@ -188,6 +193,7 @@ defineExpose({
           :data-mid="message.id"
           :class="{ 'message-flash': highlightId === message.id }"
           @reply="emit('reply', message)"
+          @preview="emit('preview', $event)"
         />
       </template>
     </div>
@@ -208,6 +214,173 @@ defineExpose({
   justify-content: flex-end;
   min-height: 100%;
   padding: 20px 24px 12px;
+}
+
+/* 服务号/公众号卡片流：单层文章卡片，标题/来源/时间三级排版（参考图 2）。 */
+.official-feed {
+  width: 100%;
+  max-width: 680px;
+  align-self: center;
+}
+
+.official-feed :deep(.message-row) {
+  justify-content: flex-start;
+  padding: 6px 0;
+}
+
+.official-feed :deep(.message-avatar),
+.official-feed :deep(.reply-action),
+.official-feed :deep(.read-check) {
+  display: none;
+}
+
+.official-feed :deep(.message-stack) {
+  max-width: 100%;
+  width: 100%;
+  align-items: stretch;
+}
+
+.official-feed :deep(.bubble) {
+  width: 100%;
+  border-radius: 16px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  padding: 13px 16px 9px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.official-feed :deep(.message-row:hover .bubble) {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: var(--panel-hover);
+}
+
+.official-feed :deep(.bubble.own) {
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.official-feed :deep(.bubble-text) {
+  font-size: 13.5px;
+  line-height: 1.65;
+  margin: 1px 0 3px;
+}
+
+/* 内层链接卡去盒化：透明融入外层卡片，成为文章主体排版。 */
+.official-feed :deep(.link-card) {
+  width: 100%;
+  margin: 0 0 3px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.official-feed :deep(.link-card:hover) {
+  background: transparent;
+}
+
+.official-feed :deep(.card-body) {
+  gap: 5px;
+}
+
+.official-feed :deep(.card-title) {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--text);
+  -webkit-line-clamp: 3;
+}
+
+.official-feed :deep(.card-meta) {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  -webkit-line-clamp: 2;
+}
+
+.official-feed :deep(.card-source) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+.official-feed :deep(.card-source)::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+/* 链接角标：幽灵圆钮，hover 唤起主题色。 */
+.official-feed :deep(.card-icon) {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.official-feed :deep(.message-row:hover .card-icon) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.official-feed :deep(.image-line) {
+  width: 100%;
+}
+
+.official-feed :deep(.image-line.own) {
+  align-items: stretch;
+}
+
+.official-feed :deep(.image-content) {
+  width: 100%;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.official-feed :deep(.voice-line),
+.official-feed :deep(.voice-line .bubble) {
+  width: 100%;
+}
+
+.official-feed :deep(.bubble-meta),
+.official-feed :deep(.image-meta) {
+  justify-content: flex-end;
+  margin-top: 3px;
+}
+
+.official-feed :deep(.bubble-time) {
+  color: var(--muted-soft);
+  font-size: 10.5px;
+}
+
+/* 日期分隔：细描边胶囊，与卡片拉开层次。 */
+.official-feed .day-divider {
+  padding: 16px 0 10px;
+}
+
+.official-feed .day-divider span {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-soft);
 }
 
 .load-older {
@@ -261,6 +434,54 @@ defineExpose({
   color: var(--text-soft);
   font-size: 14px;
   font-weight: 600;
+}
+
+/* 未选择会话时的品牌欢迎页：替代原「选择一个聊天」占位，避免首屏呈现个人对话框观感。 */
+.welcome-screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 260px;
+  text-align: center;
+}
+
+.welcome-logo {
+  display: grid;
+  place-items: center;
+  width: 82px;
+  height: 82px;
+  margin-bottom: 12px;
+  border-radius: 24px;
+  color: #eafff3;
+  background: linear-gradient(135deg, #22c55e, #0e9f6e);
+  box-shadow: 0 20px 44px rgba(34, 197, 94, 0.26);
+}
+
+.welcome-screen h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.welcome-slogan {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.welcome-hint {
+  margin-top: 14px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11.5px;
 }
 
 .message-empty span {

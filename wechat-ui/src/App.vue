@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { hasHubAuth, newIdempotencyKey, wechatApi, WechatApiError } from './api'
+import { hasHubAuth, invalidateAvatarCache, newIdempotencyKey, wechatApi, WechatApiError } from './api'
 import { sendFailureMessage, userFacingErrorMessage } from './errors'
 import { consumeEventStream } from './events'
 import {
   compareMessages,
-  connectionLabel,
   connectionTone,
   dayKey,
   formatListTime,
@@ -46,8 +45,8 @@ import ThreadAvatar from './components/ThreadAvatar.vue'
 import ThreadList from './components/ThreadList.vue'
 
 const PAGE_SIZE = 50
-/** 打开会话时拉取的最近消息条数；更早的消息滚动到顶部时按游标懒加载。 */
-const MESSAGE_PAGE_SIZE = 100
+/** 打开会话时先渲染的最近消息条数；更早的消息滚动到顶部时按游标懒加载。 */
+const MESSAGE_PAGE_SIZE = 20
 /** 消息提示卡片只覆盖最近窗口内的消息；更早的历史回灌一律静默。 */
 const TOAST_RECENT_WINDOW_MS = 10 * 60 * 1000
 const UI_SETTINGS_KEY = 'vane.wechat.ui-settings'
@@ -279,6 +278,10 @@ const account = ref<AccountSummary | null>(null)
 const selfName = ref('')
 
 const loginAttempt = ref<LoginAttempt | null>(null)
+/** 每次页面加载只自动生成一次登录二维码；失败后走手动按钮。 */
+let autoLoginTriggered = false
+/** 缓存所属的微信账号身份；换号登录时不沿用旧缓存，防止串号展示。 */
+let cachedOwnUsername = ''
 const loginBusy = ref(false)
 const loginError = ref('')
 const qrFailed = ref(false)
@@ -312,6 +315,21 @@ const messageError = ref('')
 const THREAD_CACHE_LIMIT = 24
 const threadMessagesCache = new Map<string, { items: LocalMessage[], cursor: string | null }>()
 
+// 消息窗口持久化：页面刷新后内存缓存清空，最近 8 个会话的消息先从 localStorage
+// 铺底（秒显、无骨架屏），再后台静默合并。只存服务端权威消息，本地乐观气泡
+// 与 blob 媒体 URL 刷新后失效，一律不落盘。登出时随 UI_CACHE_KEY 一起清除。
+const PERSISTED_MESSAGE_THREADS = 8
+const recentMessages = new Map<string, { items: Message[], cursor: string | null }>()
+
+function persistableMessages(items: LocalMessage[]): Message[] {
+  return items
+    .filter(item => !item.local)
+    .map((item) => {
+      const { localMedia: _media, local: _local, pending: _pending, sendState: _state, sendId: _id, sendError: _error, ...rest } = item
+      return rest
+    })
+}
+
 function cacheThreadMessages(threadId: string): void {
   if (!threadId)
     return
@@ -323,6 +341,15 @@ function cacheThreadMessages(threadId: string): void {
       break
     threadMessagesCache.delete(oldest)
   }
+  recentMessages.delete(threadId)
+  recentMessages.set(threadId, { items: persistableMessages(messages.value), cursor: messagesCursor.value })
+  while (recentMessages.size > PERSISTED_MESSAGE_THREADS) {
+    const oldest = recentMessages.keys().next().value
+    if (oldest === undefined)
+      break
+    recentMessages.delete(oldest)
+  }
+  persistSessionData()
 }
 
 // 页面刷新后的启动缓存：先把上次保存的会话列表/联系人目录画出来，再后台刷新替换。
@@ -337,28 +364,98 @@ function loadCachedSessionData(): void {
       threads?: unknown
       contacts?: unknown
       friends?: unknown
+      recentMessages?: unknown
+      ownUsername?: unknown
     }
-    if (Array.isArray(parsed.threads) && threads.value.length === 0)
-      threads.value = parsed.threads as Thread[]
+    cachedOwnUsername = typeof parsed.ownUsername === 'string' ? parsed.ownUsername : ''
+    loadReadCursor()
+    if (Array.isArray(parsed.threads) && threads.value.length === 0) {
+      const cachedThreads = parsed.threads as Thread[]
+      if (allReadAt.value)
+        cachedThreads.forEach((thread) => { thread.unreadCount = suppressReadCursor(thread.unreadCount ?? 0, thread) })
+      threads.value = cachedThreads
+    }
     if (parsed.contacts && typeof parsed.contacts === 'object' && contactNames.value.size === 0) {
       contactNames.value = new Map(Object.entries(parsed.contacts as Record<string, string>))
       applyContactNames()
     }
     if (Array.isArray(parsed.friends) && friendNames.value.size === 0)
       friendNames.value = new Set(parsed.friends as string[])
+    // 全量目录快照：刷新后通讯录直接秒开上次的分组数据，后台再静默刷新替换。
+    try {
+      const rawDir = window.localStorage.getItem(DIRECTORY_CACHE_KEY)
+      if (rawDir) {
+        const dir = JSON.parse(rawDir) as { contacts?: unknown, ownUsername?: unknown }
+        const sameAccount = !dir.ownUsername
+          || !cachedOwnUsername
+          || dir.ownUsername === cachedOwnUsername
+        if (sameAccount && Array.isArray(dir.contacts) && dir.contacts.length > 0 && directoryContacts.value.length === 0) {
+          directoryContacts.value = dir.contacts as Contact[]
+          // 快照已是完整目录：陌生人横幅在后台重载完成前也不误报。
+          contactDirectoryReady.value = true
+        }
+      }
+    }
+    catch {
+      // 目录快照损坏时忽略，走正常后台加载。
+    }
+    // 最近会话的消息窗口：刷新后打开会话先铺底秒显，后台刷新再合并。
+    if (parsed.recentMessages && typeof parsed.recentMessages === 'object' && recentMessages.size === 0) {
+      for (const [threadId, entry] of Object.entries(parsed.recentMessages as Record<string, { items?: unknown, cursor?: unknown }>)) {
+        const items = Array.isArray(entry?.items) ? (entry.items as Message[]) : null
+        if (!items || items.length === 0)
+          continue
+        recentMessages.set(threadId, { items, cursor: typeof entry.cursor === 'string' ? entry.cursor : null })
+      }
+      while (recentMessages.size > PERSISTED_MESSAGE_THREADS) {
+        const oldest = recentMessages.keys().next().value
+        if (oldest === undefined)
+          break
+        recentMessages.delete(oldest)
+      }
+    }
   }
   catch {
     // 缓存损坏时忽略，走正常加载。
   }
 }
 
+/** 换号登录时不沿用上一个账号的持久化缓存，防止串号展示。 */
+function ensureCacheAccountMatch(ownUsername: string | null | undefined): void {
+  if (!cachedOwnUsername || !ownUsername || cachedOwnUsername === ownUsername)
+    return
+  cachedOwnUsername = ownUsername
+  threads.value = []
+  recentMessages.clear()
+  threadMessagesCache.clear()
+  contactNames.value = new Map()
+  friendNames.value = new Set()
+  directoryContacts.value = []
+  lastDirectoryLoad = 0
+  allReadAt.value = 0
+  applyContactNames()
+  try {
+    window.localStorage.removeItem(UI_CACHE_KEY)
+    window.localStorage.removeItem(DIRECTORY_CACHE_KEY)
+    window.localStorage.removeItem(READ_CURSOR_KEY)
+  }
+  catch {
+    // 清理失败不影响主流程。
+  }
+}
+
 function persistSessionData(): void {
   try {
+    const recent: Record<string, { items: Message[], cursor: string | null }> = {}
+    for (const [threadId, entry] of recentMessages)
+      recent[threadId] = entry
     window.localStorage.setItem(UI_CACHE_KEY, JSON.stringify({
       savedAt: Date.now(),
+      ownUsername: account.value?.ownUsername ?? cachedOwnUsername,
       threads: threads.value.slice(0, 100),
       contacts: Object.fromEntries(contactNames.value),
       friends: [...friendNames.value].slice(0, 2000),
+      recentMessages: recent,
     }))
   }
   catch {
@@ -367,6 +464,13 @@ function persistSessionData(): void {
 }
 
 const draft = ref('')
+// 图片放大预览遮罩：点图片打开，点遮罩/Esc 关闭；表情包（type 47）不触发。
+const lightboxSrc = ref<string | null>(null)
+
+function onGlobalKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && lightboxSrc.value)
+    lightboxSrc.value = null
+}
 // 当前引用回复的消息：hover 气泡上的引用按钮设置；发送或切换会话后清空。
 const replyTo = ref<LocalMessage | null>(null)
 
@@ -513,6 +617,10 @@ const activeThreadIsGroup = computed(() => {
   return Boolean(thread && thread.kind === 'group' && thread.peerId.endsWith('@chatroom'))
 })
 
+/** 服务号/公众号（gh_）只收不发：隐藏输入框，消息流改为卡片布局。 */
+const activeThreadIsOfficial = computed(() =>
+  (activeThread.value?.peerId ?? '').trim().startsWith('gh_'))
+
 const mentionOptions = computed<MentionOption[]>(() => {
   if (!activeThreadIsGroup.value || !activeThreadId.value)
     return []
@@ -615,10 +723,15 @@ const replyToDisplay = computed(() => {
         : message.type === 47
           ? '[表情]'
           : '[消息]')
+  // 发送者显示名按 备注>昵称>username>id 优先级解析：优先联系人目录名，
+  // 其次群成员展示名，会话对象回退到会话标题，最后才暴露原始 ID。
+  const senderId = message.senderId ?? ''
   const sender = message.direction === 'outgoing'
     ? '我'
-    : (activeThread.value?.avatarMembers?.find(item => item.id === message.senderId)?.displayName
-      || message.senderId
+    : (contactNames.value.get(senderId)
+      || (senderId && senderId === activeThread.value?.peerId ? threadName(activeThread.value) : '')
+      || activeThread.value?.avatarMembers?.find(item => item.id === senderId)?.displayName
+      || senderId
       || '对方')
   return { sender, preview: preview.slice(0, 80) }
 })
@@ -652,7 +765,9 @@ const toastDelayTimers = new Map<string, number>()
 const MAX_IMAGE_VOICE_BYTES = 26_214_383
 const MAX_VIDEO_FILE_BYTES = 536_870_912
 
-const MEDIA_BATCH_SIZE = 40
+/** 每批查找/触发下载的媒体数量：小批量渐进加载，占位图标先渲染，媒体逐个到位。 */
+const MEDIA_BATCH_SIZE = 4
+const MEDIA_BATCH_DELAY = 120
 const MEDIA_RETRY_DELAY = 1_500
 const MEDIA_MAX_RETRIES = 3
 
@@ -680,11 +795,247 @@ const activeThread = computed(() => {
 /** 已确认好友的用户名集合（localType 非空 = 微信服务器通讯录同步确认）。 */
 const friendNames = ref<Set<string>>(new Set())
 
+/** 全部会话未读总数：左侧导航聊天图标的计数标记。 */
+const unreadTotal = computed(() =>
+  threads.value.reduce((sum, thread) => sum + (thread.unreadCount ?? 0), 0))
+
+/**
+ * 待处理好友申请数：左侧导航通讯录图标的计数标记。
+ * 与通讯录面板的申请列表各自独立轮询（轻量读接口）；失败保持现值不清零，
+ * 避免旧版 hub 无接口时闪红。
+ */
+const FRIEND_REQUEST_POLL_INTERVAL = 20_000
+const friendRequestCount = ref(0)
+let friendRequestCountTimer: number | null = null
+
+async function refreshFriendRequestCount(): Promise<void> {
+  const current = account.value
+  if (!current?.authenticated)
+    return
+  try {
+    const response = await wechatApi.listFriendRequests(current.id)
+    friendRequestCount.value = (response.items ?? []).length
+  }
+  catch {
+    // 拉取失败保持现值；旧版 hub 无该接口时始终为 0。
+  }
+}
+
+function startFriendRequestPoll(): void {
+  if (friendRequestCountTimer !== null)
+    return
+  void refreshFriendRequestCount()
+  friendRequestCountTimer = window.setInterval(() => {
+    void refreshFriendRequestCount()
+  }, FRIEND_REQUEST_POLL_INTERVAL)
+}
+
+function stopFriendRequestPoll(): void {
+  friendRequestCountTimer = clearTimer(friendRequestCountTimer)
+  friendRequestCount.value = 0
+}
+
+/**
+ * 「全部已读」游标：点击扫把时记录的时间戳，刷新后据此压制 daemon 回填的
+ * 历史未读数（早于游标的最后一条消息不再算未读）。游标随账号校验落盘；
+ * daemon 侧逐会话已读成功后未读天然为 0，游标只是 UI 兜底。
+ */
+const READ_CURSOR_KEY = 'vane.wechat.read-cursor'
+const allReadAt = ref(0)
+/** 会话级已读游标：threadId → 已读时刻。打开会话即记录，刷新后据此压制
+ * daemon 回流的陈旧未读（官方客户端仍在运行时会把它的未读计数写回 session.db）。 */
+const THREAD_READ_CURSOR_LIMIT = 300
+const threadReadAt = ref<Record<string, number>>({})
+
+function persistReadCursor(): void {
+  try {
+    if (!allReadAt.value && Object.keys(threadReadAt.value).length === 0)
+      return
+    window.localStorage.setItem(READ_CURSOR_KEY, JSON.stringify({
+      allReadAt: allReadAt.value,
+      threadReadAt: threadReadAt.value,
+      ownUsername: account.value?.ownUsername ?? cachedOwnUsername,
+    }))
+  }
+  catch {
+    // 写入失败不影响当前会话内的已读展示。
+  }
+}
+
+function loadReadCursor(): void {
+  try {
+    const raw = window.localStorage.getItem(READ_CURSOR_KEY)
+    if (!raw)
+      return
+    const parsed = JSON.parse(raw) as {
+      allReadAt?: unknown
+      threadReadAt?: unknown
+      ownUsername?: unknown
+    }
+    if (parsed.ownUsername && cachedOwnUsername && parsed.ownUsername !== cachedOwnUsername)
+      return
+    if (typeof parsed.allReadAt === 'number' && parsed.allReadAt > 0)
+      allReadAt.value = parsed.allReadAt
+    if (parsed.threadReadAt && typeof parsed.threadReadAt === 'object') {
+      const restored: Record<string, number> = {}
+      for (const [id, at] of Object.entries(parsed.threadReadAt as Record<string, unknown>)) {
+        if (typeof at === 'number' && at > 0)
+          restored[id] = at
+      }
+      threadReadAt.value = restored
+    }
+  }
+  catch {
+    // 游标损坏时忽略：未读数按 daemon 数据展示。
+  }
+}
+
+/** 记录会话已读游标并裁剪到上限（保留最近的记录）。 */
+function stampThreadRead(threadId: string): void {
+  if (!threadId)
+    return
+  threadReadAt.value = { ...threadReadAt.value, [threadId]: Date.now() }
+  const entries = Object.entries(threadReadAt.value)
+  if (entries.length > THREAD_READ_CURSOR_LIMIT) {
+    const keep = entries
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, THREAD_READ_CURSOR_LIMIT)
+    threadReadAt.value = Object.fromEntries(keep)
+  }
+  persistReadCursor()
+}
+
+/** 回填未读数时按已读游标压制历史未读；晚于游标的新消息不受影响。 */
+function suppressReadCursor(unreadCount: number, thread: Thread): number {
+  if (!unreadCount)
+    return unreadCount
+  const latestAt = Date.parse(thread.lastMessage?.createdAt ?? '')
+  if (!Number.isFinite(latestAt))
+    return unreadCount
+  if (allReadAt.value && latestAt < allReadAt.value)
+    return 0
+  const readAt = threadReadAt.value[thread.id]
+  if (readAt && latestAt < readAt)
+    return 0
+  return unreadCount
+}
+
+/**
+ * 后台把 daemon 侧的会话未读逐个清掉（同步到手机等其他设备）。
+ * readStateVersion 是全局游标：任何一次已读都会让列表里其他会话的版本失效，
+ * 所以只能每轮重拉列表、清一个最旧的未读会话，直到清完或达轮次上限。
+ * 每轮都是一次重的全列表请求：低频限速，避免把 daemon 打垮拖慢前台。
+ */
+async function syncAllThreadsReadToDaemon(): Promise<void> {
+  const current = account.value
+  if (!current)
+    return
+  for (let round = 0; round < 40 && !disposed; round++) {
+    try {
+      const response = await wechatApi.listThreads(current.id, PAGE_SIZE)
+      if (disposed)
+        return
+      const target = (response.items ?? []).find(thread =>
+        (thread.unreadCount ?? 0) > 0 && thread.readStateVersion)
+      if (!target)
+        return
+      await wechatApi.markThreadRead(current.id, target.id, target.readStateVersion)
+    }
+    catch {
+      // 409 冲突或网络抖动：下一轮重拉版本继续。
+    }
+    await sleep(1_500)
+  }
+}
+
+/** 一键全部已读：立即清 UI + 记游标，daemon 侧后台慢慢同步（单飞防重入）。 */
+let readSyncRunning = false
+
+function markAllThreadsRead(): void {
+  for (const thread of threads.value)
+    thread.unreadCount = 0
+  unseenBelow.value = 0
+  for (const toast of [...incomingToasts.value])
+    dismissToast(toast.id)
+  allReadAt.value = Date.now()
+  persistReadCursor()
+  // UI 已经被游标清零时也要同步 daemon（未读只存在于 daemon/其他设备侧）。
+  if (readSyncRunning)
+    return
+  readSyncRunning = true
+  void syncAllThreadsReadToDaemon().finally(() => {
+    readSyncRunning = false
+  })
+}
+
 /** 通讯录目录：username → 展示名，用于在服务端资料同步完成前快速显示名字。 */
 const contactNames = ref<Map<string, string>>(new Map())
 
+/** 全量通讯录预载：登录后后台拉取，通讯录面板打开时直接秒开。 */
+const directoryContacts = ref<Contact[]>([])
+
+/** 目录快照独立缓存：全量目录体积大，避免挤爆主缓存 key 的 localStorage 配额。 */
+const DIRECTORY_CACHE_KEY = 'vane.wechat.directory-cache'
+/** 目录全量重拉的最小间隔：SSE 事件风暴或频繁切页时不再反复跑 40 页同步。 */
+const DIRECTORY_REFRESH_INTERVAL = 60_000
+let lastDirectoryLoad = 0
+
+/** 目录快照瘦身：只保留 UI 展示与分类所需字段，version 等大字段不落盘。 */
+function slimContact(contact: Contact): Contact {
+  return {
+    id: contact.id,
+    username: contact.username,
+    displayName: contact.displayName,
+    nickname: contact.nickname,
+    remark: contact.remark,
+    alias: contact.alias,
+    localType: contact.localType,
+    classification: contact.classification
+      ? {
+          category: contact.classification.category,
+          businessKind: contact.classification.businessKind,
+        }
+      : undefined,
+  }
+}
+
+function persistDirectoryCache(): void {
+  try {
+    window.localStorage.setItem(DIRECTORY_CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      ownUsername: account.value?.ownUsername ?? cachedOwnUsername,
+      contacts: directoryContacts.value.map(slimContact),
+    }))
+  }
+  catch {
+    // 快照超配额或隐私模式下写入失败：内存缓存仍然有效，不影响当前使用。
+  }
+}
+
+/**
+ * 品牌服务通知用户名集合（美团/瑞幸等 wxid 企业客服）。
+ * 这些会话 peerId 不是 gh_ 前缀，靠联系人目录的 business 分类识别，
+ * 会话列表把它们与服务号一起折叠进「服务通知」聚合入口。
+ */
+const businessUsernames = computed(() => {
+  const set = new Set<string>()
+  for (const contact of directoryContacts.value) {
+    if (contact.classification?.category === 'business' && contact.username)
+      set.add(contact.username)
+  }
+  return set
+})
+
+/** 好友目录是否已成功加载；完成前不显示陌生人横幅，避免同步未完成时全列表误报。 */
+const contactDirectoryReady = ref(false)
+
 /** 单聊对方还不是好友时显示顶部提醒；公众号/小程序类会话无需好友关系，不提醒。 */
 const peerIsStranger = computed(() => {
+  if (!contactDirectoryReady.value)
+    return false
+  // 联系人同步尚未就绪时 profile 里只有不完整的联系人行，横幅必然误报。
+  if (account.value?.contactSyncReady === false)
+    return false
   const thread = activeThread.value
   if (!thread || thread.kind !== 'direct')
     return false
@@ -712,14 +1063,20 @@ const NON_PERSONAL_CATEGORIES = new Set(['system', 'business', 'openim', 'openim
  * 尚未写官方 local_type 位）时，把个人类联系人都视为已知联系人，避免
  * 通讯录与陌生人横幅完全失效；一旦出现确认条目则严格只认确认数据。
  */
-async function loadContactDirectory(): Promise<void> {
+async function loadContactDirectory(force = false): Promise<void> {
   const current = account.value
   if (!current?.authenticated)
+    return
+  // 节流：SSE 的 contacts.updated 会随资料同步反复触发；60s 内已拉过全量就跳过，
+  // 手动权威刷新（force）不受限。快照铺底后界面有数据，短暂延迟不造成空屏。
+  if (!force && Date.now() - lastDirectoryLoad < DIRECTORY_REFRESH_INTERVAL)
     return
   try {
     const items: Contact[] = []
     let cursor: string | null = null
-    for (let page = 0; page < 10; page++) {
+    // 目录加载不设 10 页小上限：联系人超过 2000 时，多出的好友会被误判为陌生人。
+    // 每页在 daemon 目录缓存下 ~25ms，安全上限 40 页（8000 条）防异常游标循环。
+    for (let page = 0; page < 40; page++) {
       const response = await wechatApi.listContacts(current.id, '', 200, cursor)
       items.push(...(response.items ?? []))
       cursor = response.nextCursor ?? null
@@ -743,14 +1100,47 @@ async function loadContactDirectory(): Promise<void> {
     }
     friendNames.value = friends
     contactNames.value = names
+    directoryContacts.value = items
     applyContactNames()
+    lastDirectoryLoad = Date.now()
+    persistDirectoryCache()
     persistSessionData()
+    contactDirectoryReady.value = true
   }
   catch {
-    // 好友集合加载失败不阻塞聊天；横幅宁可多显示也不误隐藏。
-    if (friendNames.value.size === 0)
-      friendNames.value = new Set()
+    // 目录加载失败保持未就绪：横幅宁可暂时不显示，也不要在数据不完整时全列表误报。
   }
+}
+
+/** 本会话周期内已按需刷新过权威资料的联系人，避免重复 RPC。 */
+const refreshedProfiles = new Set<string>()
+
+/**
+ * 打开单聊时按需拉取权威资料（对齐官方客户端「打开会话即取资料」的行为）：
+ * 备注（remark）这类受控字段不会随批量同步落到本地 contact 表，
+ * GetContact 读取才是权威来源；成功后目录与列表名自动更新。
+ */
+async function refreshContactAuthoritative(username: string): Promise<void> {
+  const current = account.value
+  if (!current?.authenticated || refreshedProfiles.has(username))
+    return
+  refreshedProfiles.add(username)
+  try {
+    let operation = await wechatApi.refreshContactProfile(current.id, username)
+    for (let attempt = 0; attempt < 20 && !isTerminalOperation(operation.state); attempt++) {
+      await sleep(600)
+      operation = await wechatApi.getOperation(current.id, operation.id)
+    }
+    if (operation.state === 'succeeded')
+      void loadContactDirectory(true)
+  }
+  catch {
+    // 离线或资料端点未就绪时静默；contacts.updated 事件流也会驱动目录刷新。
+  }
+}
+
+function isTerminalOperation(state: string): boolean {
+  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 /** 服务端会话摘要的 displayName 在资料同步完成前可能是原始 ID；用本地通讯录目录先行覆盖。 */
@@ -953,12 +1343,19 @@ async function bootstrap(): Promise<void> {
     // 先用上次保存的列表/目录瞬时铺底，网络刷新后自动替换。
     loadCachedSessionData()
     account.value = await ensureAccount()
+    ensureCacheAccountMatch(account.value.ownUsername)
     if (account.value.authenticated) {
       await loadSelfProfile()
       await loadThreads()
       void loadContactDirectory()
       void startCatalogSync()
       startStream()
+      startFriendRequestPoll()
+    }
+    else if (!autoLoginTriggered && hasHubAuth()) {
+      // 未登录时自动生成登录二维码，省去手动点击；失败后保留手动按钮兜底。
+      autoLoginTriggered = true
+      void startLogin()
     }
     scheduleAccountPoll()
   }
@@ -1009,8 +1406,9 @@ async function pollAccount(): Promise<void> {
   scheduleAccountPoll()
 }
 
-function handleSignedOut(): void {
+function handleSignedOut(explicit = false): void {
   stopStream()
+  stopFriendRequestPoll()
   loginAttempt.value = null
   selfName.value = ''
   threads.value = []
@@ -1018,11 +1416,19 @@ function handleSignedOut(): void {
   clearMessageMedia()
   threadMessagesCache.clear()
   replyTo.value = null
-  try {
-    window.localStorage.removeItem(UI_CACHE_KEY)
-  }
-  catch {
-    // 清理失败不影响登出流程。
+  // 仅用户主动退出才清空持久化缓存；会话被踢/掉线时保留，重新登录同账号
+  // 即可继续秒开（换号由 ensureCacheAccountMatch 按 wxid 校验防串号）。
+  if (explicit) {
+    recentMessages.clear()
+    allReadAt.value = 0
+    try {
+      window.localStorage.removeItem(UI_CACHE_KEY)
+      window.localStorage.removeItem(DIRECTORY_CACHE_KEY)
+      window.localStorage.removeItem(READ_CURSOR_KEY)
+    }
+    catch {
+      // 清理失败不影响登出流程。
+    }
   }
   messages.value = []
   activeThreadId.value = null
@@ -1034,6 +1440,10 @@ function handleSignedOut(): void {
   loginAttemptKey = ''
   unseenBelow.value = 0
   incomingToasts.value = []
+  friendNames.value = new Set()
+  contactNames.value = new Map()
+  directoryContacts.value = []
+  contactDirectoryReady.value = false
   for (const timer of toastTimers.values())
     window.clearTimeout(timer)
   toastTimers.clear()
@@ -1047,12 +1457,14 @@ async function afterAuthenticated(): Promise<void> {
   loginAttempt.value = null
   loginError.value = ''
   qrFailed.value = false
+  ensureCacheAccountMatch(account.value?.ownUsername)
   await loadSelfProfile()
   // 分阶段加载：先出会话列表，再补联系人资料（名字/头像），最后由用户打开会话时拉取历史消息。
   await loadThreads()
   void loadContactDirectory()
   void startCatalogSync()
   startStream()
+  startFriendRequestPoll()
 }
 
 /** 让服务器开始同步联系人目录与群资料；完成后经 SSE contacts.updated/group.updated 事件驱动界面刷新。 */
@@ -1114,7 +1526,7 @@ async function logoutAccount(): Promise<void> {
       connection: 'disconnected',
       ownUsername: null,
     }
-    handleSignedOut()
+    handleSignedOut(true)
     loginAttempt.value = null
     loginError.value = ''
     qrFailed.value = false
@@ -1237,15 +1649,26 @@ watch(
   { immediate: true },
 )
 
+/** 会话列表在途守卫：SSE 高频事件下避免同接口请求堆积把 daemon 打垮。 */
+let threadsInFlight = false
+
 async function loadThreads(): Promise<void> {
   const current = account.value
-  if (!current || !current.authenticated)
+  if (!current || !current.authenticated || threadsInFlight)
     return
+  threadsInFlight = true
   threadsLoading.value = true
   threadsError.value = ''
   try {
     const response = await wechatApi.listThreads(current.id, PAGE_SIZE)
     const items = response.items ?? []
+    // 「全部已读」游标兜底：压制 daemon 回填的历史未读，晚于游标的新消息不受影响。
+    if (allReadAt.value)
+      items.forEach((thread) => { thread.unreadCount = suppressReadCursor(thread.unreadCount ?? 0, thread) })
+    // 当前打开的会话永远显示已读：自动已读上报可能因版本冲突暂时失败，
+    // 不能让 daemon 的滞后未读数回填到正开着的会话上。
+    if (activeThreadId.value)
+      items.forEach((thread) => { if (thread.id === activeThreadId.value) thread.unreadCount = 0 })
     const draft = activeThread.value?.isDraft ? activeThread.value : null
     // 新聊天尚未出现在上游列表时保留本地草稿，避免首条消息发出后列表跳回其它会话。
     if (draft && !items.some(thread => thread.id === draft.id))
@@ -1255,13 +1678,62 @@ async function loadThreads(): Promise<void> {
     applyContactNames()
     persistSessionData()
     reconcileActiveThread()
+    // 会话列表就绪后后台预热最近会话的消息窗口。
+    warmRecentThreads()
   }
   catch (error) {
     threadsError.value = errorText(error)
   }
   finally {
+    threadsInFlight = false
     threadsLoading.value = false
   }
+}
+
+/** 后台预热的会话数与批间让出间隔：串行低频拉取，避免与前台请求抢 daemon。 */
+const WARM_THREAD_LIMIT = 12
+const WARM_FETCH_INTERVAL = 200
+const WARM_TRIGGER_INTERVAL = 5_000
+let warmGeneration = 0
+let lastWarmTrigger = 0
+
+/**
+ * 后台预热最近会话的消息窗口。daemon 首次解码一个会话的消息要数秒，
+ * 预热后点击会话直接命中缓存秒显，最新数据由 selectThread 的后台刷新合并。
+ * 只写缓存不触碰 messages.value 等 UI 状态；列表高频刷新时靠双节流防抖。
+ */
+function warmRecentThreads(): void {
+  const current = account.value
+  if (!current?.authenticated || disposed)
+    return
+  if (Date.now() - lastWarmTrigger < WARM_TRIGGER_INTERVAL)
+    return
+  lastWarmTrigger = Date.now()
+  const generation = ++warmGeneration
+  void (async () => {
+    for (const thread of threads.value.slice(0, WARM_THREAD_LIMIT)) {
+      if (generation !== warmGeneration || disposed)
+        return
+      if (thread.id === activeThreadId.value)
+        continue
+      if (threadMessagesCache.has(thread.id) || recentMessages.has(thread.id))
+        continue
+      try {
+        const response = await wechatApi.listMessages(current.id, thread.id, MESSAGE_PAGE_SIZE, undefined)
+        if (generation !== warmGeneration || disposed)
+          return
+        const items = (response.items ?? []).slice().sort(compareMessages)
+        const cursor = response.nextCursor ?? null
+        threadMessagesCache.delete(thread.id)
+        threadMessagesCache.set(thread.id, { items: items as LocalMessage[], cursor })
+        recentMessages.set(thread.id, { items, cursor })
+      }
+      catch {
+        // 预热失败静默：点击时走正常加载流程。
+      }
+      await sleep(WARM_FETCH_INTERVAL)
+    }
+  })()
 }
 
 function reconcileActiveThread(): void {
@@ -1307,6 +1779,10 @@ async function selectThread(thread: Thread): Promise<void> {
   messageError.value = ''
   // 群聊会话后台预取成员列表，@ 选择器即开即用。
   void ensureGroupMembers(thread.id)
+  // 单聊按需拉取权威资料：备注等受控字段只有 GetContact 才会落到本地目录。
+  const peer = (thread.peerId || thread.id).trim()
+  if (thread.kind === 'direct' && !peer.startsWith('gh_') && !peer.endsWith('@openim'))
+    void refreshContactAuthoritative(peer)
   // 缓存命中：先展示缓存内容（秒开），再后台静默刷新；未命中才走加载流程。
   const cached = threadMessagesCache.get(thread.id)
   if (cached) {
@@ -1314,6 +1790,17 @@ async function selectThread(thread: Thread): Promise<void> {
     threadMessagesCache.set(thread.id, cached)
     messages.value = cached.items
     messagesCursor.value = cached.cursor
+    // 缓存数据尚未做过媒体查找：立即按最新优先渐进加载，图片占位不再干等网络刷新。
+    void loadMediaForMessages(messages.value)
+    void fetchThreadMessages(thread.id, 'refresh')
+  }
+  else if (recentMessages.has(thread.id)) {
+    // 刷新页面后内存缓存已空：用持久化的消息窗口铺底秒显，后台刷新合并。
+    const persisted = recentMessages.get(thread.id)!
+    messages.value = persisted.items.map(item => ({ ...item }))
+    messagesCursor.value = persisted.cursor
+    cacheThreadMessages(thread.id)
+    void loadMediaForMessages(messages.value)
     void fetchThreadMessages(thread.id, 'refresh')
   }
   else {
@@ -1444,13 +1931,48 @@ function startDraftChat(id: string, displayName: string): void {
 
 function markThreadRead(thread: Thread): void {
   const current = account.value
-  if (!current || !thread.readStateVersion)
+  if (!current)
+    return
+  // 用户已在此会话里看过消息：无论 daemon 上报是否成功，都记会话游标，
+  // 刷新后据此压制官方客户端写回的陈旧未读。
+  stampThreadRead(thread.id)
+  if (!thread.readStateVersion)
     return
   void wechatApi.markThreadRead(current.id, thread.id, thread.readStateVersion)
     .catch(() => {
-      // 已读是 best-effort，不影响聊天展示。
+      // 已读是 best-effort。版本冲突（409）时重拉一次最新版本补报，
+      // 否则自动已读会被后台同步循环的版本 bump 顶掉，未读挂在 daemon 侧。
+      window.setTimeout(() => {
+        if (disposed)
+          return
+        const fresh = threads.value.find(item => item.id === thread.id)
+        if (fresh?.readStateVersion)
+          void wechatApi.markThreadRead(current.id, fresh.id, fresh.readStateVersion).catch(() => {})
+      }, 1_200)
     })
 }
+
+/** 打开会话期间的新消息自动已读上报：连发多条时防抖合并成一次调用。 */
+let autoReadTimer: number | null = null
+let autoReadThread: Thread | null = null
+
+function scheduleAutoRead(thread: Thread): void {
+  autoReadThread = thread
+  if (autoReadTimer !== null)
+    return
+  autoReadTimer = window.setTimeout(() => {
+    autoReadTimer = null
+    const target = autoReadThread
+    autoReadThread = null
+    // 用列表里的最新对象上报（readStateVersion 可能已被刷新更新）。
+    const fresh = target ? threads.value.find(item => item.id === target.id) : undefined
+    if (fresh)
+      markThreadRead(fresh)
+  }, 400)
+}
+
+/** 会话消息 refresh 在途守卫：SSE 连发事件时同会话 refresh 不叠加请求。 */
+let messageRefreshInFlight: string | null = null
 
 async function fetchThreadMessages(threadId: string, mode: 'reset' | 'refresh' | 'older'): Promise<void> {
   const current = account.value
@@ -1458,6 +1980,13 @@ async function fetchThreadMessages(threadId: string, mode: 'reset' | 'refresh' |
     return
   if (mode === 'older' && !messagesCursor.value)
     return
+  // daemon 的消息接口在忙时可能到 10s：在途期间跳过重复刷新，
+  // 在途结束后由后续事件再次调度，不丢新消息。
+  if (mode === 'refresh') {
+    if (messageRefreshInFlight === threadId)
+      return
+    messageRefreshInFlight = threadId
+  }
 
   const requestId = ++activeMessageRequest
   if (mode === 'reset') {
@@ -1506,6 +2035,8 @@ async function fetchThreadMessages(threadId: string, mode: 'reset' | 'refresh' |
     }
   }
   finally {
+    if (mode === 'refresh' && messageRefreshInFlight === threadId)
+      messageRefreshInFlight = null
     if (requestId === activeMessageRequest) {
       messagesLoading.value = false
       olderLoading.value = false
@@ -1552,16 +2083,25 @@ function mergeServerMessages(items: Message[]): void {
 
   merged.sort(compareMessages)
 
-  // 服务端回显到达后移除同内容的本地乐观气泡，避免重复。
-  const outgoingEcho = new Set(
-    itemsForMerge
-      .filter(item => item.direction === 'outgoing' && item.body)
-      .map(item => `${item.body}|${dayKey(item.createdAt)}`),
-  )
+  // 服务端回显是已持久化的权威数据：按「同文本+同日」配额移除本地乐观气泡
+  // （含「发送中」），避免回显先于发送状态翻转到时成对出现。失败/待确认的
+  // 本地气泡带错误反馈，不参与移除；同文本多次发送按回显条数配额，不会误删。
+  const echoBudget = new Map<string, number>()
+  for (const item of itemsForMerge) {
+    if (item.direction === 'outgoing' && item.body) {
+      const key = `${item.body}|${dayKey(item.createdAt)}`
+      echoBudget.set(key, (echoBudget.get(key) ?? 0) + 1)
+    }
+  }
   messages.value = merged.filter((item) => {
-    if (!item.local || item.sendState !== 'accepted')
+    if (!item.local || item.direction !== 'outgoing' || !item.body || item.sendError)
       return true
-    return !outgoingEcho.has(`${item.body ?? ''}|${dayKey(item.createdAt)}`)
+    const key = `${item.body}|${dayKey(item.createdAt)}`
+    const budget = echoBudget.get(key) ?? 0
+    if (budget <= 0)
+      return true
+    echoBudget.set(key, budget - 1)
+    return false
   })
 }
 
@@ -1657,8 +2197,11 @@ async function retryPendingMedia(): Promise<void> {
   if (ids.length === 0)
     return
 
-  for (let index = 0; index < ids.length; index += MEDIA_BATCH_SIZE)
+  for (let index = 0; index < ids.length; index += MEDIA_BATCH_SIZE) {
     await lookupMediaBatch(current.id, ids.slice(index, index + MEDIA_BATCH_SIZE))
+    if (index + MEDIA_BATCH_SIZE < ids.length)
+      await sleep(MEDIA_BATCH_DELAY)
+  }
 
   const hasPending = Object.values(mediaByMessage.value).some(
     entry => entry.state === 'pending'
@@ -1730,8 +2273,14 @@ async function loadMediaForMessages(items: LocalMessage[]): Promise<void> {
     ids.push(item.id)
   }
 
-  for (let index = 0; index < ids.length; index += MEDIA_BATCH_SIZE)
-    await lookupMediaBatch(current.id, ids.slice(index, index + MEDIA_BATCH_SIZE))
+  // 打开会话时视口停在底部：最新消息的媒体最先进入视口，倒序渐进加载。
+  // 批间让出主线程，保证列表与占位图标始终可交互，媒体慢慢补齐。
+  const ordered = [...ids].reverse()
+  for (let index = 0; index < ordered.length; index += MEDIA_BATCH_SIZE) {
+    await lookupMediaBatch(current.id, ordered.slice(index, index + MEDIA_BATCH_SIZE))
+    if (index + MEDIA_BATCH_SIZE < ordered.length)
+      await sleep(MEDIA_BATCH_DELAY)
+  }
 }
 
 function clearMessageMedia(): void {
@@ -1861,6 +2410,9 @@ async function sendTextMessage(current: AccountSummary, thread: Thread, text: st
   }
 
   messages.value = [...messages.value, local]
+  // 发送即视为已读（官方客户端语义）：清掉列表未读并同步 daemon。
+  thread.unreadCount = 0
+  markThreadRead(thread)
   // 数组读取返回的是响应式代理；后续必须改这个代理，直接改 local 原生对象不会触发视图。
   const pendingMessage = messages.value[messages.value.length - 1]
   // 引用回复：被引用消息必须有平台权威 serverId 才能发送引用。
@@ -1940,6 +2492,9 @@ async function sendAttachment(thread: Thread, attachment: StagedAttachment): Pro
   }
 
   messages.value = [...messages.value, local]
+  // 发送即视为已读（官方客户端语义）：清掉列表未读并同步 daemon。
+  thread.unreadCount = 0
+  markThreadRead(thread)
   const pendingMessage = messages.value[messages.value.length - 1]
   messageList.value?.scrollToBottom(true)
 
@@ -2038,7 +2593,9 @@ async function pollSend(local: LocalMessage, sendId: string): Promise<void> {
     if (local.sendState === 'accepted' || local.sendState === 'failed' || local.sendState === 'needs_review' || local.sendState === 'cancelled')
       break
 
-    await sleep(800)
+    // daemon 入队即返回，多数发送在前几百毫秒内完成：首拍密、后续放缓，
+    // 兼顾状态翻转的即时性与查询开销。
+    await sleep(attempt < 5 ? 150 : 700)
     try {
       const intent = await wechatApi.getSend(sendId)
       local.sendState = intent.state
@@ -2086,6 +2643,9 @@ function startStream(): void {
   lastCursor = null
   const token = ++streamToken
   const currentAccountId = account.value.id
+  // daemon 重启（SSE 断开重连）后重新校验全部头像：重启瞬间快照可能把别的
+  // 联系人的头像字节短暂错配给某个 username，旧字节已被 UI 缓存，必须整批重取。
+  let streamOpenedOnce = false
 
   void (async () => {
     while (!disposed && token === streamToken && account.value?.authenticated) {
@@ -2098,14 +2658,23 @@ function startStream(): void {
           after: lastCursor,
           signal: controller.signal,
           onOpen: () => {
-            if (token === streamToken)
-              streamStatus.value = 'live'
+            if (token !== streamToken)
+              return
+            streamStatus.value = 'live'
+            if (streamOpenedOnce) {
+              invalidateAvatarCache()
+              window.dispatchEvent(new Event('wx-avatars-invalidated'))
+            }
+            streamOpenedOnce = true
           },
           onEvent: event => handleStreamEvent(event),
         })
       }
-      catch {
-        // 网络中断或运行时重启：保留 cursor，退避重连。
+      catch (error) {
+        // Cursor 过期（410，事件已超出保留窗）时丢弃旧游标，下次连接从
+        // daemon 当前事件头开始；其余网络中断保留 cursor，退避重连。
+        if (error instanceof Error && error.message.includes('410'))
+          lastCursor = null
       }
       if (token !== streamToken || disposed)
         return
@@ -2137,6 +2706,9 @@ function pushIncomingToast(threadId: string): void {
     return
   const thread = threads.value.find(item => item.id === threadId)
   if (!thread)
+    return
+  // 其他设备设置的「消息免打扰」：不弹提示卡片，未读徽标保留（与官方客户端一致）。
+  if (thread.muted === true)
     return
   if ((thread.lastMessage?.direction ?? '') === 'outgoing')
     return
@@ -2213,6 +2785,32 @@ function handleStreamEvent(event: WechatEvent): void {
       if (!messageList.value?.isAtBottom())
         unseenBelow.value += 1
       scheduleMessageRefresh(threadId)
+      // 打开着的会话收到新消息即自动上报已读（对齐官方客户端）：
+      // 否则 daemon 会把会话打开期间进来的消息计成未读并回填到列表。
+      if (isNewMessage) {
+        const thread = threads.value.find(item => item.id === threadId)
+        if (thread) {
+          thread.unreadCount = 0
+          scheduleAutoRead(thread)
+        }
+      }
+    }
+    scheduleThreadRefresh()
+    return
+  }
+
+  if (kind === 'thread.read-state') {
+    // 其他设备已读：daemon 已清本地会话未读，UI 立即同步徽标并撤下提示卡片，
+    // 再刷新列表以对齐部分已读等场景的权威未读数。
+    const threadId = String(event.data.threadId ?? '')
+    if (threadId) {
+      const thread = threads.value.find(item => item.id === threadId)
+      if (thread && (thread.unreadCount ?? 0) > 0)
+        thread.unreadCount = 0
+      for (const toast of [...incomingToasts.value]) {
+        if (toast.threadId === threadId)
+          dismissToast(toast.id)
+      }
     }
     scheduleThreadRefresh()
     return
@@ -2258,10 +2856,12 @@ function handleStreamEvent(event: WechatEvent): void {
 
 onMounted(() => {
   void bootstrap()
+  window.addEventListener('keydown', onGlobalKeydown)
 })
 
 onBeforeUnmount(() => {
   disposed = true
+  window.removeEventListener('keydown', onGlobalKeydown)
   setQrObjectUrl(null)
   clearTimer(accountTimer)
   clearTimer(loginTimer)
@@ -2325,6 +2925,8 @@ onBeforeUnmount(() => {
         v-model:bubble-out-color="bubbleOutColor"
         v-model:toast-duration-ms="toastDurationMs"
         v-model:toast-enabled="toastEnabled"
+        :unread-total="unreadTotal"
+        :friend-request-count="friendRequestCount"
         :account="account"
         :account-name="selfName || '微信'"
         :account-refreshing="manualRefreshing"
@@ -2345,16 +2947,19 @@ onBeforeUnmount(() => {
           :active-id="activeThreadId"
           :query="threadQuery"
           :loading="threadsLoading"
+          :business-usernames="businessUsernames"
           @select="selectThread"
           @update:query="threadQuery = $event"
           @refresh="loadThreads"
           @new-chat="openNewChat"
+          @read-all="markAllThreadsRead"
         />
 
         <ContactsPanel
           v-else
           ref="contactsPanel"
           :account="account"
+          :preloaded-contacts="directoryContacts"
           @select="startChatWithContact"
           @start-id="startChatWithId"
         />
@@ -2387,7 +2992,7 @@ onBeforeUnmount(() => {
             <div class="chat-title">
               <h2>{{ threadName(activeThread) }}</h2>
               <p>
-                {{ threadKindLabel(activeThread.kind) }}
+                {{ threadKindLabel(activeThread.kind, activeThread.peerId) }}
                 <span v-if="(activeThread.unreadCount ?? 0) > 0"> · {{ activeThread.unreadCount }} 条未读</span>
               </p>
             </div>
@@ -2423,10 +3028,10 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else>
-            <span class="chat-placeholder-icon"><Icon name="message" :size="20" /></span>
+            <span class="brand-logo"><Icon name="message" :size="18" /></span>
             <div class="chat-title">
-              <h2>{{ selfName || '微信' }}</h2>
-              <p>{{ connectionLabel(account.connection, account.authenticated) }}</p>
+              <h2>Agent WeChat</h2>
+              <p>面向人与 AI 智能体的开源微信客户端</p>
             </div>
             <div class="chat-actions">
               <button class="icon-button" type="button" title="搜索聊天" @click="focusThreadSearch">
@@ -2580,7 +3185,7 @@ onBeforeUnmount(() => {
 
               <div class="details-row">
                 <span class="details-label">会话类型</span>
-                <span>{{ threadKindLabel(activeThread.kind) }}</span>
+                <span>{{ threadKindLabel(activeThread.kind, activeThread.peerId) }}</span>
               </div>
               <div class="details-row">
                 <span class="details-label">会话 ID</span>
@@ -2654,7 +3259,15 @@ onBeforeUnmount(() => {
           @load-older="loadOlderMessages"
           @at-bottom="handleMessageListBottom"
           @reply="startReply"
+          @preview="lightboxSrc = $event"
         />
+
+        <!-- 图片放大预览：点击遮罩或按 Esc 关闭；表情包不触发。 -->
+        <Transition name="fade">
+          <div v-if="lightboxSrc" class="lightbox" @click="lightboxSrc = null">
+            <img :src="lightboxSrc" alt="">
+          </div>
+        </Transition>
 
         <Transition name="jump">
           <button
@@ -2669,11 +3282,12 @@ onBeforeUnmount(() => {
         </Transition>
 
         <Composer
+          v-if="activeThread && !activeThreadIsOfficial"
           ref="composer"
           v-model="draft"
           :attachments="stagedAttachments"
-          :disabled="!activeThread || connectionState === 'offline'"
-          :placeholder="activeThread ? `发消息给 ${threadName(activeThread)}` : '选择一个聊天'"
+          :disabled="connectionState === 'offline'"
+          :placeholder="`发消息给 ${threadName(activeThread)}`"
           :reply-to="replyToDisplay"
           :mention-available="activeThreadIsGroup"
           :mention-options="mentionOptions"
@@ -2982,15 +3596,16 @@ onBeforeUnmount(() => {
   font-size: 10.5px;
 }
 
-.chat-placeholder-icon {
+.brand-logo {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  color: var(--muted);
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  color: #eafff3;
+  background: linear-gradient(135deg, #22c55e, #0e9f6e);
+  box-shadow: 0 8px 20px rgba(34, 197, 94, 0.22);
 }
 
 .chat-banner {

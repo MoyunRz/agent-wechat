@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { wechatApi, WechatApiError } from '../api'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
@@ -9,6 +9,8 @@ import ThreadAvatar from './ThreadAvatar.vue'
 
 const props = defineProps<{
   account: AccountSummary
+  /** 登录后台预载的全量通讯录；进入面板时直接秒开，无需再等网络。 */
+  preloadedContacts?: Contact[]
 }>()
 
 const emit = defineEmits<{
@@ -51,7 +53,7 @@ const NON_PERSONAL_CATEGORIES = new Set(['system', 'business', 'openim', 'openim
  * 联系人行全部由消息投影创建）时降级为显示所有个人类联系人，
  * 群聊与公众号/企业微信/系统账号仍然排除。
  */
-const sortedContacts = computed(() => {
+const personalContacts = computed(() => {
   const personal = contacts.value.filter((contact) => {
     const category = contact.classification?.category ?? 'unknown'
     if (NON_PERSONAL_CATEGORIES.has(category))
@@ -59,9 +61,153 @@ const sortedContacts = computed(() => {
     return !(contact.username ?? '').endsWith('@chatroom')
   })
   const confirmed = personal.filter(contact => contact.localType != null)
-  const visible = confirmed.length > 0 ? confirmed : personal
-  return visible
-    .sort((left, right) => contactName(left).localeCompare(contactName(right), 'zh-Hans-CN'))
+  return confirmed.length > 0 ? confirmed : personal
+})
+
+/**
+ * 目录分类（对齐官方客户端语义）：business 分类按 businessKind 拆分——
+ * 订阅号展示为「公众号」，服务号单独一组；@openim 企业客服归「企业微信联系人」，
+ * 不再单设「小程序客服」分组。无 businessKind 的 gh_ 兜底进公众号组。
+ */
+const officialContacts = computed(() => {
+  return contacts.value.filter((contact) => {
+    if ((contact.username ?? '').startsWith('gh_'))
+      return (contact.classification?.businessKind ?? 'official_account') === 'official_account'
+    return false
+  })
+})
+
+const serviceContacts = computed(() => {
+  return contacts.value.filter((contact) => {
+    const classification = contact.classification
+    if (classification?.category !== 'business')
+      return false
+    if ((contact.username ?? '').startsWith('gh_'))
+      return classification.businessKind == null
+        || classification.businessKind === 'service_account'
+    // wxid 企业客服号（美团等）在目录里同样是 service_account。
+    return classification.businessKind === 'service_account'
+  })
+})
+
+/**
+ * 企业微信联系人：只显示被微信服务器通讯录同步确认的条目。
+ * @openim 客服号大多是被群聊/小程序触达后微信自动写入本地目录的单向条目
+ * （localType 为空），从未加过好友，不应出现在通讯录；全组无确认条目时整组隐藏。
+ */
+const wecomContacts = computed(() => {
+  const all = contacts.value.filter(contact =>
+    ['openim', 'openimCustomerService'].includes(contact.classification?.category ?? '')
+    || (contact.username ?? '').endsWith('@openim'))
+  return all.filter(contact => contact.localType != null)
+})
+
+const systemContacts = computed(() => contacts.value.filter(contact =>
+  contact.classification?.category === 'system'))
+
+/**
+ * 联系人显示名：企业微信客服（@openim）资料常缺失——昵称为空或直接回填原始 ID，
+ * 此时兜底为「企业微信客服」而不是暴露一串数字。
+ */
+function openimContactName(contact: Contact): string {
+  const peer = contact.username || contact.id || ''
+  if (!peer.endsWith('@openim'))
+    return contactName(contact)
+  const name = contact.remark?.trim()
+    || contact.nickname?.trim()
+    || contact.displayName?.trim()
+    || ''
+  if (!name || name === peer)
+    return '企业微信客服'
+  return name
+}
+
+/** 同名条目计数：企业客服常见同一应用多个客服席位共用昵称（真实不同账号）。 */
+const openimNameCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const contact of contacts.value) {
+    const name = openimContactName(contact)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return counts
+})
+
+/** 同昵称的小程序客服多条并列时加 ID 尾部 4 位区分（如「吃喝玩乐福利君 ·51152」）。 */
+function contactDisplayName(contact: Contact): string {
+  const name = openimContactName(contact)
+  const peer = contact.username || contact.id || ''
+  if (peer.endsWith('@openim') && (openimNameCounts.value.get(name) ?? 0) > 1) {
+    const digits = peer.replace(/\D/g, '')
+    if (digits.length >= 4)
+      return `${name} ·${digits.slice(-4)}`
+  }
+  return name
+}
+
+/** 排序键与显示名一致：备注 || 昵称 || ID（openim 缺资料时用兜底名），中文按拼音升序。 */
+function byName(left: Contact, right: Contact): number {
+  return openimContactName(left).localeCompare(openimContactName(right), 'zh-Hans-CN')
+}
+
+interface ContactGroup {
+  key: string
+  label: string
+  items: Contact[]
+}
+
+const contactGroups = computed<ContactGroup[]>(() => {
+  const groups: ContactGroup[] = []
+  const push = (key: string, label: string, items: Contact[]) => {
+    if (items.length > 0)
+      groups.push({ key, label, items: [...items].sort(byName) })
+  }
+  push('personal', '联系人', personalContacts.value)
+  push('official', '公众号', officialContacts.value)
+  push('service', '服务号', serviceContacts.value)
+  push('wecom', '企业微信联系人', wecomContacts.value)
+  push('system', '系统账号', systemContacts.value)
+  return groups
+})
+
+/** 搜索时服务端已跨分类过滤：平铺全部匹配项。 */
+const searchResults = computed(() => [...contacts.value].sort(byName))
+
+/** 折叠展开状态：联系人默认展开，其余分类收起（对齐 Linux 客户端）。 */
+const expandedGroups = ref<Record<string, boolean>>({
+  personal: true,
+  official: false,
+  service: false,
+  wecom: false,
+  system: false,
+})
+
+function isGroupExpanded(key: string): boolean {
+  return expandedGroups.value[key] ?? false
+}
+
+function toggleGroup(key: string): void {
+  expandedGroups.value[key] = !isGroupExpanded(key)
+}
+
+interface DisplayRow {
+  key: string
+  contact?: Contact
+  nested?: boolean
+  group?: { key: string, label: string, count: number }
+}
+
+const displayRows = computed<DisplayRow[]>(() => {
+  if (normalizedQuery.value)
+    return searchResults.value.map(contact => ({ key: contact.id, contact }))
+  const rows: DisplayRow[] = []
+  for (const group of contactGroups.value) {
+    rows.push({ key: `group:${group.key}`, group: { key: group.key, label: group.label, count: group.items.length } })
+    if (isGroupExpanded(group.key)) {
+      for (const contact of group.items)
+        rows.push({ key: contact.id, contact, nested: true })
+    }
+  }
+  return rows
 })
 
 function requestName(item: PendingFriendRequest): string {
@@ -270,29 +416,40 @@ function describeOperationFailure(operation: Operation): string {
   return '通讯录同步失败，请稍后重试。'
 }
 
-async function loadContacts(): Promise<void> {
+async function loadContacts(force = false): Promise<void> {
+  // 无搜索词时优先用登录后预载的全量目录：面板秒开，不重复拉网络。
+  // 搜索、手动同步（force）仍走服务端以拿到过滤/最新结果。
+  if (!normalizedQuery.value && !force && props.preloadedContacts?.length) {
+    contacts.value = [...props.preloadedContacts]
+    loading.value = false
+    error.value = ''
+    return
+  }
   const token = ++requestToken
   loading.value = true
   error.value = ''
   try {
     // daemon 单页上限 200：游标翻页拉全量，搜索词由服务端过滤。
-    const items: Contact[] = []
+    // 每页到达即渲染：通讯录有数千条时首屏 ~1s 出内容，其余页面渐进填充。
     let cursor: string | null = null
+    const loaded: Contact[] = []
     for (let page = 0; page < 10; page++) {
       const response = await wechatApi.listContacts(props.account.id, normalizedQuery.value, 200, cursor)
-      items.push(...(response.items ?? []))
       cursor = response.nextCursor ?? null
+      if (token !== requestToken)
+        return
+      loaded.push(...(response.items ?? []))
+      // 赋新数组触发响应式更新；骨架屏条件为「加载中且无数据」，首页到达即消失。
+      contacts.value = [...loaded]
+      if (page === 0)
+        loading.value = false
       if (!cursor)
         break
     }
-    if (token !== requestToken)
-      return
-    contacts.value = items
   }
   catch (value) {
     if (token !== requestToken)
       return
-    contacts.value = []
     error.value = describeError(value)
   }
   finally {
@@ -351,7 +508,7 @@ async function syncContacts(): Promise<void> {
       syncStatus.value = describeOperationFailure(operation)
       return
     }
-    await loadContacts()
+    await loadContacts(true)
     void loadFriendRequests()
     syncStatus.value = '通讯录同步完成'
     window.setTimeout(() => {
@@ -391,6 +548,12 @@ onMounted(() => {
   }, FRIEND_REQUEST_POLL_INTERVAL)
 })
 
+// 后台预载目录刷新（如单条资料权威刷新）时，无搜索的默认列表跟随更新。
+watch(() => props.preloadedContacts, (value) => {
+  if (!normalizedQuery.value && value?.length)
+    contacts.value = [...value]
+})
+
 onBeforeUnmount(() => {
   if (searchTimer !== null)
     window.clearTimeout(searchTimer)
@@ -407,7 +570,7 @@ onBeforeUnmount(() => {
       <div class="contacts-title-row">
         <div class="contacts-title">
           <h2>通讯录</h2>
-          <span class="contact-count">{{ sortedContacts.length }}</span>
+          <span class="contact-count">{{ personalContacts.length }}</span>
         </div>
         <div class="header-actions">
           <button
@@ -444,7 +607,7 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="error" class="contacts-status error">
       {{ error }}
-      <button type="button" @click="loadContacts">重试</button>
+      <button type="button" @click="loadContacts()">重试</button>
     </div>
 
     <div class="contacts-scroll scrollbar-thin">
@@ -484,30 +647,48 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <div v-if="loading && sortedContacts.length === 0" class="contacts-skeletons">
+      <div v-if="loading && contacts.length === 0" class="contacts-skeletons">
         <span v-for="index in 6" :key="index" class="contact-skeleton" />
       </div>
 
-      <template v-else-if="sortedContacts.length > 0">
-        <button
-          v-for="contact in sortedContacts"
-          :key="contact.id"
-          type="button"
-          class="contact-row"
-          @click="emit('select', contact)"
-        >
-          <ThreadAvatar
-            :account-id="account.id"
-            :name="contactName(contact)"
-            :username="contact.username || contact.id"
-            :size="40"
-          />
-          <span class="contact-main">
-            <span class="contact-name">{{ contactName(contact) }}</span>
-            <span v-if="contact.alias" class="contact-sub">{{ contact.alias }}</span>
-          </span>
-          <span class="contact-action">聊天</span>
-        </button>
+      <template v-else-if="displayRows.length > 0">
+        <template v-for="row in displayRows" :key="row.key">
+          <button
+            v-if="row.group"
+            type="button"
+            class="group-header"
+            @click="toggleGroup(row.group.key)"
+          >
+            <Icon
+              name="chevron-down"
+              :size="14"
+              class="group-chevron"
+              :class="{ open: isGroupExpanded(row.group.key) }"
+            />
+            <span class="group-label">{{ row.group.label }}</span>
+            <span class="group-count">{{ row.group.count }}</span>
+          </button>
+
+          <button
+            v-else
+            type="button"
+            class="contact-row"
+            :class="{ nested: row.nested }"
+            @click="emit('select', row.contact!)"
+          >
+            <ThreadAvatar
+              :account-id="account.id"
+              :name="contactDisplayName(row.contact!)"
+              :username="row.contact!.username || row.contact!.id"
+              :size="40"
+            />
+            <span class="contact-main">
+              <span class="contact-name">{{ contactDisplayName(row.contact!) }}</span>
+              <span v-if="row.contact!.alias" class="contact-sub">{{ row.contact!.alias }}</span>
+            </span>
+            <span class="contact-action">聊天</span>
+          </button>
+        </template>
       </template>
 
       <div v-else class="contacts-empty">
@@ -738,6 +919,57 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow-y: auto;
   padding: 2px 6px 12px;
+}
+
+/* 目录分类折叠：对齐 Linux 客户端的分组头部（箭头 + 名称 + 数量）。 */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.group-header:hover {
+  background: var(--panel-hover);
+}
+
+.group-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 0.18s ease;
+}
+
+.group-chevron.open {
+  transform: rotate(180deg);
+}
+
+.group-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.group-count {
+  flex: 0 0 auto;
+  color: var(--muted-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.contact-row.nested {
+  padding-left: 26px;
 }
 
 .contact-row {

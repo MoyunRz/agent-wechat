@@ -233,6 +233,17 @@ function onFilesPicked(event: Event): void {
   input.value = ''
 }
 
+/** 粘贴图片/文件：剪贴板里的文件项自动进入附件暂存；纯文本走默认粘贴。 */
+function onPaste(event: ClipboardEvent): void {
+  if (props.disabled)
+    return
+  const files = Array.from(event.clipboardData?.files ?? [])
+  if (files.length === 0)
+    return
+  event.preventDefault()
+  emit('attachFiles', files)
+}
+
 const MAX_TEXTAREA_HEIGHT = 132
 
 function resize(): void {
@@ -425,6 +436,7 @@ defineExpose({ focus })
         spellcheck="false"
         @input="onInput"
         @keydown="onKeydown"
+        @paste="onPaste"
         @click="detectMention()"
         @blur="closeMentionSoon"
         @compositionstart="composing = true"

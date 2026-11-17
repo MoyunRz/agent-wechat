@@ -12,6 +12,8 @@ const props = defineProps<{
   query: string
   loading: boolean
   filterMode: ThreadFilter
+  /** 分类为 business 的联系人（美团/瑞幸等品牌服务通知），折叠进「服务通知」聚合。 */
+  businessUsernames?: Set<string>
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +22,7 @@ const emit = defineEmits<{
   'update:filterMode': [value: ThreadFilter]
   refresh: []
   newChat: []
+  readAll: []
 }>()
 
 const searchInput = ref<HTMLInputElement | null>(null)
@@ -29,11 +32,11 @@ const FILTER_TABS: ReadonlyArray<{ mode: ThreadFilter, label: string }> = [
   { mode: 'unread', label: '未读' },
   { mode: 'direct', label: '单聊' },
   { mode: 'groups', label: '群聊' },
-  { mode: 'mini', label: '小程序' },
-  { mode: 'official', label: '服务号' },
+  { mode: 'mini', label: '企业微信客服' },
+  { mode: 'official', label: '服务通知' },
 ]
 
-/** 按会话类型分桶：群聊 / 小程序（OpenIM 客服）/ 服务号（gh_ 公众号）/ 其余为单聊。 */
+/** 按会话类型分桶：群聊 / 小程序（OpenIM 客服）/ 服务通知（gh_ 公众号与品牌客服）/ 其余为单聊。 */
 function threadBucket(thread: Thread): 'direct' | 'groups' | 'mini' | 'official' {
   if (thread.kind === 'group')
     return 'groups'
@@ -42,7 +45,35 @@ function threadBucket(thread: Thread): 'direct' | 'groups' | 'mini' | 'official'
     return 'mini'
   if (peer.startsWith('gh_'))
     return 'official'
+  // 品牌服务通知（美团/瑞幸等）：wxid 客服号在联系人目录里标记为 business，
+  // 与官方客户端一致折叠进「服务通知」聚合入口。
+  if (props.businessUsernames?.has(peer))
+    return 'official'
   return 'direct'
+}
+
+/** 折叠聚合的分类：key 与分桶一致，图标与文案对应官方客户端的聚合入口。 */
+const COLLAPSED_CATEGORIES = {
+  mini: { label: '企业微信客服', icon: 'mini' },
+  official: { label: '服务通知', icon: 'service' },
+} as const
+
+type CollapsibleKey = keyof typeof COLLAPSED_CATEGORIES
+
+interface CategoryGroup {
+  key: CollapsibleKey
+  label: string
+  icon: string
+  threads: Thread[]
+  unread: number
+  latest: Thread
+}
+
+interface DisplayItem {
+  key: string
+  thread?: Thread
+  nested?: boolean
+  group?: CategoryGroup
 }
 
 const filtered = computed(() => {
@@ -62,6 +93,91 @@ const filtered = computed(() => {
   })
 })
 
+/** 仅在全部/未读且无搜索词时折叠：搜索平铺，避免命中的会话藏在聚合行里。 */
+const collapseEnabled = computed(() =>
+  (props.filterMode === 'all' || props.filterMode === 'unread')
+  && props.query.trim() === '')
+
+function latestThread(threads: Thread[]): Thread {
+  return threads.reduce((best, thread) => {
+    const bestTime = Date.parse(best.lastMessage?.createdAt ?? '') || 0
+    const time = Date.parse(thread.lastMessage?.createdAt ?? '') || 0
+    return time > bestTime ? thread : best
+  })
+}
+
+const activeBucket = computed<CollapsibleKey | null>(() => {
+  const thread = props.threads.find(item => item.id === props.activeId)
+  if (!thread)
+    return null
+  const bucket = threadBucket(thread)
+  return bucket === 'mini' || bucket === 'official' ? bucket : null
+})
+
+/** 各分类手动展开状态；激活会话所在分类始终展开。 */
+const expandedCategories = ref<Record<CollapsibleKey, boolean>>({ mini: false, official: false })
+
+function categoryExpanded(key: CollapsibleKey): boolean {
+  return expandedCategories.value[key] || activeBucket.value === key
+}
+
+function toggleCategory(key: CollapsibleKey): void {
+  expandedCategories.value[key] = !categoryExpanded(key)
+}
+
+/** 折叠分类成员按 [备注||昵称||ID] 字母升序展示；聚合行的位置与预览仍取最新时间。 */
+function memberKey(thread: Thread): string {
+  return threadName(thread)
+}
+
+function byMemberName(left: Thread, right: Thread): number {
+  return memberKey(left).localeCompare(memberKey(right), 'zh-Hans-CN')
+}
+
+/** 渲染序列：普通会话原样输出；启用折叠时分类成员收敛为聚合行，展开后在行下方缩进展示。 */
+const displayItems = computed<DisplayItem[]>(() => {
+  const items = filtered.value
+  if (!collapseEnabled.value)
+    return items.map(thread => ({ key: thread.id, thread }))
+  const groups = new Map<CollapsibleKey, Thread[]>()
+  const result: DisplayItem[] = []
+  for (const thread of items) {
+    const bucket = threadBucket(thread)
+    if (bucket === 'mini' || bucket === 'official') {
+      if (!groups.has(bucket)) {
+        groups.set(bucket, [])
+        // 聚合行落在该分类最新会话原有的排序位置上。
+        result.push({ key: `cat:${bucket}` })
+      }
+      groups.get(bucket)!.push(thread)
+    }
+    else {
+      result.push({ key: thread.id, thread })
+    }
+  }
+  for (const [key, members] of groups) {
+    const meta = COLLAPSED_CATEGORIES[key]
+    const group: CategoryGroup = {
+      key,
+      label: meta.label,
+      icon: meta.icon,
+      threads: members,
+      unread: members.reduce((sum, thread) => sum + (thread.unreadCount ?? 0), 0),
+      latest: latestThread(members),
+    }
+    const entry = result.find(item => item.key === `cat:${key}`)
+    if (entry)
+      entry.group = group
+    if (categoryExpanded(key)) {
+      const sorted = [...members].sort(byMemberName)
+      sorted.forEach((thread, index) => {
+        result.splice(result.indexOf(entry!) + 1 + index, 0, { key: `${key}:${thread.id}`, thread, nested: true })
+      })
+    }
+  }
+  return result.filter(item => item.thread || item.group)
+})
+
 function focusSearch(): void {
   searchInput.value?.focus()
 }
@@ -78,6 +194,14 @@ defineExpose({ focusSearch })
           <span class="thread-count">{{ threads.length }}</span>
         </div>
         <div class="header-actions">
+          <button
+            class="icon-button"
+            type="button"
+            title="全部已读"
+            @click="emit('readAll')"
+          >
+            <Icon name="checks" :size="16" />
+          </button>
           <button
             class="icon-button"
             type="button"
@@ -145,40 +269,92 @@ defineExpose({ focusSearch })
       </div>
 
       <template v-else-if="filtered.length > 0">
-        <button
-          v-for="thread in filtered"
-          :key="thread.id"
-          type="button"
-          class="thread-item"
-          :class="{ active: thread.id === activeId }"
-          @click="emit('select', thread)"
-        >
-          <ThreadAvatar
-            :account-id="account.id"
-            :name="threadName(thread)"
-            :username="thread.peerId"
-            :kind="thread.kind"
-            :members="thread.avatarMembers"
-            :size="46"
-          />
-
-          <span class="thread-main">
-            <span class="thread-row">
-              <span class="thread-name">{{ threadName(thread) }}</span>
-              <span class="thread-time">{{ formatListTime(thread.lastMessage?.createdAt) }}</span>
+        <template v-for="item in displayItems" :key="item.key">
+          <button
+            v-if="item.group"
+            type="button"
+            class="thread-item category-row"
+            @click="toggleCategory(item.group.key)"
+          >
+            <span class="category-avatar" :class="`category-${item.group.icon}`">
+              <svg v-if="item.group.icon === 'mini'" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M16.1 6.6c-1.3-1.5-3.5-2-5.3-1.2-1.8.8-2.7 2.5-2.1 4 .5 1.3 1.9 1.8 3.5 2.2 1.6.4 3 1 3.5 2.2.6 1.5-.3 3.2-2.1 4-1.8.8-4 .3-5.3-1.2"
+                  fill="none"
+                  stroke="#fff"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M18.9 3.85a1.15 1.15 0 0 1 1.73 1v14.3a1.15 1.15 0 0 1-1.73 1L9.3 14.95H5.55A1.95 1.95 0 0 1 3.6 13v-2a1.95 1.95 0 0 1 1.95-1.95H9.3z"
+                  fill="#fff"
+                />
+                <path d="M7.5 16.15h2.9v1.75a1.9 1.9 0 0 1-3.8 0v-1.75z" fill="#fff" />
+              </svg>
             </span>
-            <span class="thread-row thread-preview-row">
-              <span class="thread-preview">{{ previewText(thread) }}</span>
-              <span class="thread-badges">
-                <Icon v-if="thread.pinned" name="pin" :size="13" class="muted-icon" />
-                <Icon v-if="thread.muted" name="mute" :size="13" class="muted-icon" />
-                <span v-if="(thread.unreadCount ?? 0) > 0" class="unread-badge">
-                  {{ (thread.unreadCount ?? 0) > 99 ? '99+' : thread.unreadCount }}
+
+            <span class="thread-main">
+              <span class="thread-row">
+                <span class="thread-name">{{ item.group.label }}</span>
+                <span class="thread-time">{{ formatListTime(item.group.latest.lastMessage?.createdAt) }}</span>
+              </span>
+              <span class="thread-row thread-preview-row">
+                <span class="thread-preview">{{ threadName(item.group.latest) }}：{{ previewText(item.group.latest) }}</span>
+                <span class="thread-badges">
+                  <span v-if="item.group.unread > 0" class="unread-badge">
+                    {{ item.group.unread > 99 ? '99+' : item.group.unread }}
+                  </span>
+                  <Icon
+                    name="chevron-down"
+                    :size="14"
+                    class="category-chevron"
+                    :class="{ open: categoryExpanded(item.group.key) }"
+                  />
                 </span>
               </span>
             </span>
-          </span>
-        </button>
+          </button>
+
+          <button
+            v-else
+            type="button"
+            class="thread-item"
+            :class="{ active: item.thread!.id === activeId, nested: item.nested }"
+            @click="emit('select', item.thread!)"
+          >
+            <ThreadAvatar
+              :account-id="account.id"
+              :name="threadName(item.thread!)"
+              :username="item.thread!.peerId"
+              :kind="item.thread!.kind"
+              :members="item.thread!.avatarMembers"
+              :size="46"
+            />
+
+            <span class="thread-main">
+              <span class="thread-row">
+                <span class="thread-name">{{ threadName(item.thread!) }}</span>
+                <span class="thread-time">{{ formatListTime(item.thread!.lastMessage?.createdAt) }}</span>
+              </span>
+              <span class="thread-row thread-preview-row">
+                <span class="thread-preview">{{ previewText(item.thread!) }}</span>
+                <span class="thread-badges">
+                  <Icon v-if="item.thread!.pinned" name="pin" :size="13" class="muted-icon" />
+                  <Icon v-if="item.thread!.muted" name="mute" :size="13" class="muted-icon" />
+                  <span
+                    v-if="(item.thread!.unreadCount ?? 0) > 0"
+                    class="unread-badge"
+                    :class="{ 'unread-muted': item.thread!.muted }"
+                  >
+                    {{ (item.thread!.unreadCount ?? 0) > 99 ? '99+' : item.thread!.unreadCount }}
+                  </span>
+                </span>
+              </span>
+            </span>
+          </button>
+        </template>
       </template>
 
       <div v-else class="thread-empty">
@@ -189,7 +365,7 @@ defineExpose({ focusSearch })
         <p v-else-if="filterMode === 'unread'">没有未读消息</p>
         <p v-else-if="filterMode === 'groups'">还没有群聊</p>
         <p v-else-if="filterMode === 'direct'">还没有单聊</p>
-        <p v-else-if="filterMode === 'mini'">还没有小程序会话</p>
+        <p v-else-if="filterMode === 'mini'">还没有企业微信客服会话</p>
         <p v-else-if="filterMode === 'official'">还没有服务号消息</p>
         <template v-else>
           <p>还没有聊天</p>
@@ -379,6 +555,51 @@ defineExpose({ focusSearch })
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* 小程序/服务号聚合入口：固定品牌图标 + 汇总未读，点击展开二级列表。 */
+.category-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: #fff;
+}
+
+.category-avatar svg {
+  width: 58%;
+  height: 58%;
+  display: block;
+}
+
+.category-mini {
+  background: linear-gradient(135deg, #7c6cf6, #5536d8);
+  box-shadow: 0 6px 16px rgba(124, 108, 246, 0.24);
+}
+
+.category-service {
+  background: linear-gradient(135deg, #ffb14e, #f5760a);
+  box-shadow: 0 6px 16px rgba(245, 118, 10, 0.24);
+}
+
+.category-chevron {
+  color: var(--muted-soft);
+  transition: transform 0.18s ease;
+}
+
+.category-chevron.open {
+  transform: rotate(180deg);
+}
+
+.thread-item.nested {
+  padding-left: 22px;
+  background: color-mix(in srgb, var(--panel-soft) 55%, transparent);
+}
+
+.thread-item.nested:hover {
+  background: var(--panel-hover);
+}
+
 .thread-main {
   flex: 1;
   min-width: 0;
@@ -449,6 +670,12 @@ defineExpose({ focusSearch })
   font-size: 10.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+/* 免打扰会话的未读：对齐官方客户端用灰色提示，弱化打扰感。 */
+.unread-badge.unread-muted {
+  background: var(--muted-soft);
+  color: var(--rail-bg, #1a212c);
 }
 
 .thread-empty {

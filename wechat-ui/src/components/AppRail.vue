@@ -19,6 +19,10 @@ const props = defineProps<{
   bubbleOutColor: string
   toastDurationMs: number
   toastEnabled: boolean
+  /** 全部会话未读总数；离开聊天视图时显示在聊天图标上。 */
+  unreadTotal?: number
+  /** 待处理好友申请数；离开通讯录视图时显示在通讯录图标上。 */
+  friendRequestCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -113,20 +117,30 @@ function onToastDurationInput(event: Event): void {
   if (Number.isFinite(value))
     emit('update:toastDurationMs', Math.round(value * 1000))
 }
+
+/** 徽标文案：超过 99 显示 99+。 */
+function badgeText(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
 </script>
 
 <template>
   <nav class="app-rail">
-    <div class="rail-logo" title="微信会话">
-      <svg class="rail-logo-mark" viewBox="0 0 48 48" aria-hidden="true">
-        <path
-          class="logo-bubble"
-          d="M9 10h30a4 4 0 0 1 4 4v18a4 4 0 0 1-4 4H24l-8.5 7v-7H9a4 4 0 0 1-4-4V14a4 4 0 0 1 4-4Z"
-        />
-        <path class="logo-code" d="M19 19l-5 5 5 5" />
-        <path class="logo-code" d="M29 19l5 5-5 5" />
-      </svg>
-    </div>
+    <button
+      type="button"
+      class="rail-avatar-button"
+      :class="{ active: accountMenuOpen }"
+      title="账号信息"
+      @click="toggleAccountMenu"
+    >
+      <ThreadAvatar
+        :account-id="account.id"
+        :name="accountLabel"
+        :username="account.ownUsername"
+        :size="38"
+      />
+      <span class="rail-status" :data-tone="tone" />
+    </button>
 
     <div class="rail-nav">
       <button
@@ -136,7 +150,12 @@ function onToastDurationInput(event: Event): void {
         title="聊天"
         @click="openChats"
       >
-        <Icon name="message" :size="20" />
+        <Icon name="message" :size="24" />
+        <!-- 进入视图即消失：计数标记只提醒有新内容，不重复列表里的未读红点。 -->
+        <span
+          v-if="(unreadTotal ?? 0) > 0 && view !== 'chats'"
+          class="rail-badge"
+        >{{ badgeText(unreadTotal ?? 0) }}</span>
       </button>
       <button
         type="button"
@@ -145,26 +164,15 @@ function onToastDurationInput(event: Event): void {
         title="通讯录"
         @click="openContacts"
       >
-        <Icon name="contacts" :size="20" />
+        <Icon name="contacts" :size="24" />
+        <span
+          v-if="(friendRequestCount ?? 0) > 0 && view !== 'contacts'"
+          class="rail-badge"
+        >{{ badgeText(friendRequestCount ?? 0) }}</span>
       </button>
     </div>
 
     <div class="rail-bottom">
-      <button
-        type="button"
-        class="rail-avatar-button"
-        :class="{ active: accountMenuOpen }"
-        title="账号信息"
-        @click="toggleAccountMenu"
-      >
-        <ThreadAvatar
-          :account-id="account.id"
-          :name="accountLabel"
-          :username="account.ownUsername"
-          :size="38"
-        />
-        <span class="rail-status" :data-tone="tone" />
-      </button>
       <button
         type="button"
         class="rail-button"
@@ -410,40 +418,6 @@ function onToastDurationInput(event: Event): void {
   background: var(--rail-bg);
 }
 
-.rail-logo {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 20px;
-  border: 1px solid rgba(34, 197, 94, 0.24);
-  border-radius: 13px;
-  color: #f4f4f5;
-  background: linear-gradient(160deg, #141a17, #0b0f0d);
-  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.rail-logo-mark {
-  width: 27px;
-  height: 27px;
-}
-
-.logo-bubble {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 3.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.logo-code {
-  fill: none;
-  stroke: #22c55e;
-  stroke-width: 3.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .rail-nav {
   display: flex;
   flex-direction: column;
@@ -490,6 +464,26 @@ function onToastDurationInput(event: Event): void {
   opacity: 0.55;
 }
 
+/* 导航计数标记：新消息/新朋友申请提醒，进入对应视图后消失。 */
+.rail-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #f43f5e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--rail-bg);
+  pointer-events: none;
+}
+
 .rail-bottom {
   display: flex;
   flex-direction: column;
@@ -504,6 +498,7 @@ function onToastDurationInput(event: Event): void {
   place-items: center;
   width: 46px;
   height: 46px;
+  margin-bottom: 18px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -556,6 +551,12 @@ function onToastDurationInput(event: Event): void {
   background: var(--popover-bg);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(18px);
+}
+
+/* 账号入口在栏顶：账号弹窗从顶部展开，设置弹窗保持底部。 */
+.account-popover {
+  top: 62px;
+  bottom: auto;
 }
 
 /* 设置面板加宽 5%，容纳更长的设置项文案 */

@@ -21,10 +21,23 @@ export function contactName(contact: Contact | null | undefined): string {
 export function threadName(thread: Thread | null | undefined): string {
   if (!thread)
     return ''
-  return thread.displayName?.trim() || thread.id || '未命名会话'
+  const name = thread.displayName?.trim()
+  // 企业微信客服（@openim）没有资料行，服务端标签回退成原始 ID；
+  // GetContact 也不提供其资料，统一兜底为可读文案。
+  const peer = (thread.peerId || thread.id).trim()
+  if (peer.endsWith('@openim') && (!name || name === peer))
+    return '企业微信客服'
+  return name || thread.id || '未命名会话'
 }
 
-export function threadKindLabel(kind: string): string {
+export function threadKindLabel(kind: string, peerId?: string | null): string {
+  // daemon 对 gh_ 公众号/服务号与 @openim 客服会话仍给 direct 分类，按 peerId 修正展示。
+  // @openim 家族即企业微信客服（瑞幸等品牌客服与小程序客服同属此通道）。
+  const peer = (peerId ?? '').trim()
+  if (peer.startsWith('gh_'))
+    return '服务号'
+  if (peer.endsWith('@openim'))
+    return '企业微信客服'
   switch (kind) {
     case 'group':
       return '群聊'

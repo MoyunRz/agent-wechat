@@ -12,6 +12,7 @@ export type IconName =
   | 'chevron-right'
   | 'pin'
   | 'mute'
+  | 'checks'
   | 'users'
   | 'user'
   | 'contacts'
@@ -56,6 +57,8 @@ const paths: Record<IconName, string[]> = {
   'chevron-right': ['m9 6 6 6-6 6'],
   pin: ['M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z', 'M12 14v7'],
   mute: ['M4 9v6h4l5 4V5L8 9H4Z', 'm18 9-4 6', 'm14 9 4 6'],
+  // 双勾（check-check）：「全部已读」按钮，含义与消息已读符号一致。
+  checks: ['M18 6 7 17l-5-5', 'm22 10-7.5 7.5L13 16'],
   users: ['M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z', 'M2.5 20a5.5 5.5 0 0 1 11 0', 'M16 10.5a3 3 0 1 0 0-6', 'M16.5 14.2a5.2 5.2 0 0 1 5 5.8'],
   user: ['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M4.5 21a7.5 7.5 0 0 1 15 0'],
   contacts: ['M10 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M3 21a7 7 0 0 1 14 0', 'M17 8.5h4', 'M17 12.5h4'],

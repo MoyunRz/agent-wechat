@@ -54,7 +54,13 @@ const ownAvatarName = computed(() => {
   return props.account.ownUsername?.trim() || '我'
 })
 
-const emit = defineEmits<{ reply: [] }>()
+const emit = defineEmits<{ reply: [], preview: [src: string] }>()
+
+// 非表情包图片（type 47 是表情包）点击放大预览。
+function previewImage(src: string | null | undefined): void {
+  if (props.message.type !== 47 && src)
+    emit('preview', src)
+}
 
 // 引用回复需要平台权威 serverId；本地刚发出、尚未回显的消息没有，不提供引用。
 const canReply = computed(() => Boolean(props.message.serverId?.trim()))
@@ -476,6 +482,9 @@ const imageStateLabel = computed(() => {
   return mediaStateLabel.value || '图片暂不可用'
 })
 
+/** 图片加载中：媒体在途时占位方块显示转圈动画（60×60）。 */
+const isImageLoading = computed(() => !imageSrc.value && props.media?.state === 'pending')
+
 // 好友验证消息（type 37）：展示申请人、附言，待处理时可在卡片上直接同意。
 const friendRequestCard = computed(() => props.message.friendRequest ?? null)
 
@@ -597,13 +606,20 @@ const sendStatus = computed(() => {
         <img
           v-if="imageSrc"
           class="image-content"
-          :class="{ pending: message.pending, error: Boolean(message.sendError) }"
+          :class="{ pending: message.pending, error: Boolean(message.sendError), clickable: message.type !== 47 }"
           :src="imageSrc"
           alt=""
+          @click="previewImage(imageSrc)"
         >
-        <span v-else class="image-placeholder" :class="{ own }">
-          <Icon name="image" :size="16" />
-          <span>{{ mediaPlaceholder }}{{ imageStateLabel ? ` · ${imageStateLabel}` : '' }}</span>
+        <span v-else-if="isImageLoading" class="image-loading-box">
+          <span class="image-spinner" />
+        </span>
+        <span
+          v-else
+          class="image-placeholder"
+          :title="`${mediaPlaceholder}${imageStateLabel ? ` · ${imageStateLabel}` : ''}`"
+        >
+          <Icon name="image" :size="20" />
         </span>
         <div class="image-meta" :class="{ error: Boolean(message.sendError) }">
           <span v-if="sendStatus" class="send-status">{{ sendStatus }}</span>
@@ -653,10 +669,22 @@ const sendStatus = computed(() => {
 
         <div v-else-if="mediaKind && mediaKind !== 'voice'" class="local-media server-media">
           <template v-if="mediaKind === 'image'">
-            <img v-if="imageUrl" :src="imageUrl" alt="">
-            <span v-else class="media-placeholder">
-              <Icon name="image" :size="14" />
-              {{ mediaPlaceholder }}{{ mediaStateLabel ? ` · ${mediaStateLabel}` : '' }}
+            <img
+              v-if="imageUrl"
+              :src="imageUrl"
+              alt=""
+              class="image-content clickable"
+              @click="previewImage(imageUrl)"
+            >
+            <span v-else-if="isImageLoading" class="image-loading-box">
+              <span class="image-spinner" />
+            </span>
+            <span
+              v-else
+              class="image-placeholder"
+              :title="`${mediaPlaceholder}${mediaStateLabel ? ` · ${mediaStateLabel}` : ''}`"
+            >
+              <Icon name="image" :size="20" />
             </span>
           </template>
 
@@ -743,7 +771,13 @@ const sendStatus = computed(() => {
             <span class="fr-name">{{ friendRequestName || '新的朋友' }}</span>
             <span class="fr-greeting">{{ friendRequestCard.greeting?.trim() || '请求添加你为朋友' }}</span>
           </div>
-          <div class="fr-foot">
+          <div
+            class="fr-foot"
+            :class="{
+              'fr-state-ok': friendRequestEffectiveStatus === 'accepted',
+              'fr-state-no': friendRequestEffectiveStatus === 'declined',
+            }"
+          >
             <template v-if="friendRequestEffectiveStatus === 'accepted'">
               <Icon name="check" :size="12" />
               <span>已添加</span>
@@ -935,26 +969,46 @@ const sendStatus = computed(() => {
   opacity: 0.72;
 }
 
+/* 图片加载中占位：60×60 方块 + 转圈动画（媒体在途时显示）。 */
+.image-loading-box {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+  box-shadow: var(--media-shadow);
+}
+
+.image-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--muted-soft);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+/* 非表情包图片可点击放大：鼠标给放大提示。 */
+.image-content.clickable {
+  cursor: zoom-in;
+}
+
 .image-content.error {
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.55), var(--media-shadow);
 }
 
+/* 图片终态占位（表情包不可用/获取失败等）：与加载占位同款 60×60 方块，
+   仅图标无文案，原因文案移到 hover title。 */
 .image-placeholder {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 220px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: var(--bubble-in);
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+  box-shadow: var(--media-shadow);
   color: var(--text-soft);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.image-placeholder.own {
-  background: var(--bubble-out-surface);
-  color: var(--bubble-out-text);
 }
 
 .image-meta {
@@ -1313,32 +1367,43 @@ const sendStatus = computed(() => {
   background: var(--bubble-in-surface);
 }
 
+/* 好友申请卡片：单层简洁卡片。外层气泡扁平化，卡片自身承载全部视觉。 */
+.bubble:has(.friend-request-card) {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bubble:has(.friend-request-card) .bubble-meta {
+  padding: 5px 6px 0;
+}
+
 .friend-request-card {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: 44px 1fr;
   grid-template-rows: auto auto;
-  column-gap: 10px;
-  width: 256px;
-  margin: 2px 0 6px;
-  padding: 12px 12px 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  border-radius: 12px;
-  background:
-    linear-gradient(
-      150deg,
-      color-mix(in srgb, var(--accent) 8%, transparent),
-      transparent 46%
-    ),
-    var(--bubble-in-surface);
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.16);
+  column-gap: 12px;
+  width: 300px;
+  margin: 2px 0 4px;
+  padding: 13px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bubble-in-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  transition: border-color 0.15s ease;
+}
+
+.message-row:hover .friend-request-card {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
 }
 
 .fr-avatar {
   grid-column: 1;
   grid-row: 1;
   position: relative;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
 }
 
 .fr-badge {
@@ -1359,7 +1424,7 @@ const sendStatus = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   grid-column: 2;
   grid-row: 1;
   min-width: 0;
@@ -1369,7 +1434,7 @@ const sendStatus = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -1378,25 +1443,41 @@ const sendStatus = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.4;
-  color: var(--text-soft);
-  opacity: 0.88;
+  color: var(--muted);
 }
 
+/* 状态行：无分隔线，右对齐；已处理状态渲染成胶囊。 */
 .fr-foot {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: flex-end;
+  gap: 6px;
   grid-column: 1 / -1;
   grid-row: 2;
-  margin-top: 10px;
-  padding: 7px 0 9px;
-  border-top: 1px dashed color-mix(in srgb, currentColor 16%, transparent);
+  margin-top: 12px;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.3;
-  opacity: 0.82;
+}
+
+.fr-state-ok,
+.fr-state-no {
+  width: fit-content;
+  margin-left: auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+}
+
+.fr-state-ok {
+  background: color-mix(in srgb, #22c55e 14%, transparent);
+  color: #4ade80;
+}
+
+.fr-state-no {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
 }
 
 .fr-accept {
