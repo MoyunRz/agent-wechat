@@ -1,7 +1,7 @@
 # verifyuser 协议规格（Windows 4.x Weixin.dll 静态分析结论）
 
 > 依据：Ghidra 12.1.4 对 `Weixin.dll`（SHA-256 `d733489e…`，204,168,240 字节）的完整自动分析。
-> 提取会话产物：`C:\Users\user\AppData\Local\Temp\wx-reverse\rea-session\`（fieldnum-* 共 45 个 JSON，text\ 下有提取后的伪代码）。
+> 提取会话产物：`<本地临时目录>\wx-reverse\rea-session\`（fieldnum-* 共 45 个 JSON，text\ 下有提取后的伪代码）。
 > 证据分级：**[硬]** = 反汇编直接读出；**[推]** = 结构+3.x 对照推断，需灰度验证。
 > 所有 VA 的文件偏移换算：`file_offset = VA - 0x180001a00`（PE 段表映射已验证）。
 
@@ -159,7 +159,7 @@ VerifyUserRequest {
 
 ## 9. hub 实装状态（2026-11-16）
 
-实装位置：fork 仓库 `MoyunRz/agent-wechat` 分支 `feat/verify-user-accept`（提交 ba9199c，基于公开 upstream `thisnick/agent-wechat` @ cdb6635；本地 checkout 在 `C:\Users\user\GolandProjects\agent-wechat-debug`，origin= fork（HTTPS），upstream= 官方）。CGI 编号与字段布局属协议事实（与现有 newsync/oplog 端点同风格中性语言），随公开 fork 发布已获用户确认。
+实装位置：fork 仓库 `MoyunRz/agent-wechat` 分支 `feat/verify-user-accept`（提交 ba9199c，基于公开 upstream `thisnick/agent-wechat` @ cdb6635；本地 checkout 在私有工作目录，origin= fork（HTTPS），upstream= 官方）。CGI 编号与字段布局属协议事实（与现有 newsync/oplog 端点同风格中性语言），随公开 fork 发布已获用户确认。
 
 已实装（本机验证：`cargo check` + `clippy` 三 crate 通过；wechat-protocol 5 个单测通过；core/api 测试与 `pnpm interfaces` 门禁因 Windows 缺 Perl/Node 24.22+ 无法本机执行，需 Linux CI 复核）：
 

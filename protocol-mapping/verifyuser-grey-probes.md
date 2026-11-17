@@ -1,6 +1,6 @@
 # verifyuser 灰度探针记录（信封 -2 排查）
 
-> 2026-11-17。环境：本机 hub（`C:\Users\user\wx-hub\wx.exe`，release 构建），账号
+> 2026-11-17。环境：本机 hub（`C:\Users\<user>\wx-hub\wx.exe`，release 构建），账号
 > `account-self-b`（wxid-self-b），申请人 `wxid-self-a`
 >（昵称A，通过手机号搜索，scene=15，encryptusername 210B / ticket 350B）。
 > 探针开关：`WX_VERIFY_PROBE`（请求形状）与 `WX_VERIFY_CROSS`（cgi/path/longlink），
