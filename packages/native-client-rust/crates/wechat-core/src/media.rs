@@ -13,8 +13,8 @@ use std::{
 use wechat_protocol::{
     file_upload::FileUploadReservation,
     media::{
-        CdnClient, LargeCdnRoute, MediaDescriptor, MediaQuality, PreparedImageUpload,
-        PreparedUpload, PreparedVideoUpload, StickerDescriptor, UploadedImage, UploadedMedia,
+        CdnClient, LargeCdnRoute, MediaDescriptor, MediaQuality, PreparedFileUpload,
+        PreparedImageUpload, PreparedVideoUpload, StickerDescriptor, UploadedImage, UploadedMedia,
         UploadedVideo,
     },
 };
@@ -3147,7 +3147,7 @@ impl Core {
         match plan.request.kind {
             MediaKind::File => {
                 if plan.uploaded_file.is_none() {
-                    let prepared = PreparedUpload::from_file(
+                    let prepared = PreparedFileUpload::new(
                         source_file.open()?,
                         source_file.byte_length,
                         &source_file.md5,
@@ -3165,13 +3165,13 @@ impl Core {
                         .transpose()?;
                     let uploaded = cdn_transfer(permit.as_deref_mut(), self, account, || {
                         if modern_file {
-                            cdn.native()?.upload_large_file_with_progress(
+                            cdn.native()?.upload_large_file_from_file_with_progress(
                                 &prepared,
                                 material.task_id,
                                 callback,
                             )
                         } else {
-                            cdn.upload(&prepared, &callback)
+                            cdn.upload_file(&prepared, &callback)
                         }
                     })?;
                     if let Some(current) = self.complete_file_cdn_upload(
@@ -3221,7 +3221,7 @@ impl Core {
                     )?;
                     self.phase_media(account, id, "uploading")?;
                     self.progress_media(account, id, 0, Some(original.len() as u64))?;
-                    let uploaded = cdn.upload_image(&prepared)?;
+                    let uploaded = cdn.upload_image(&prepared, &callback)?;
                     plan.uploaded_image = Some(uploaded);
                     plan.image_variant_sizing = sizing;
                     self.save_send_plan(account, id, &plan)?;
@@ -3293,7 +3293,7 @@ impl Core {
                         .original_video_material
                         .as_ref()
                         .context("video_preparation_missing")?;
-                    let prepared = PreparedUpload::from_file(
+                    let prepared = PreparedFileUpload::new(
                         source_file.open()?,
                         source_file.byte_length,
                         &source_file.md5,
@@ -3312,7 +3312,11 @@ impl Core {
                     self.phase_media(account, id, "uploading")?;
                     let fence = self.media_authorization_fence(account)?;
                     let uploaded = cdn_transfer(permit.as_deref_mut(), self, account, || {
-                        raw_cdn.upload_video_original(&prepared, raw_material.task_id, &callback)
+                        raw_cdn.upload_video_original_file(
+                            &prepared,
+                            raw_material.task_id,
+                            &callback,
+                        )
                     })?;
                     plan.uploaded_video.as_mut().unwrap().original = Some(uploaded);
                     self.save_send_plan(account, id, &plan)?;
