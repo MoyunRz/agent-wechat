@@ -22,6 +22,47 @@
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
+          },
+          "proactiveCache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProactiveCacheKinds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which message kinds arrive already downloaded and cached. Every kind is on by default.\nA request that omits this keeps the kinds the account already has."
+          }
+        },
+        "required": [
+          "autoDownloadMaxBytes",
+          "proactiveCache"
+        ],
+        "type": "object"
+      },
+      "AccountSettingsInput": {
+        "additionalProperties": false,
+        "description": "Hub policy; this is never written into an official WeChat profile.",
+        "properties": {
+          "autoDownloadMaxBytes": {
+            "description": "Largest advertised size in bytes that the daemon downloads automatically for this account,\nfrom 0 to 536870912. Thumbnails and voice notes are always downloaded, and 0 limits\nautomatic downloads to those; the default is 52428800.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proactiveCache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProactiveCacheKinds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which message kinds arrive already downloaded and cached. Every kind is on by default.\nA request that omits this keeps the kinds the account already has."
           }
         },
         "required": [
@@ -3465,6 +3506,79 @@
         ],
         "type": "object"
       },
+      "ProactiveCacheKinds": {
+        "additionalProperties": false,
+        "description": "Which message kinds the daemon downloads and keeps cached on arrival. Each\nkind is enabled by default; thumbnails stay exempt from the gates.",
+        "properties": {
+          "file": {
+            "description": "Download and cache received files. The default is true.",
+            "type": "boolean"
+          },
+          "image": {
+            "description": "Download and cache received images. The default is true.",
+            "type": "boolean"
+          },
+          "sticker": {
+            "description": "Download and cache received stickers and emoji. The default is true.",
+            "type": "boolean"
+          },
+          "video": {
+            "description": "Download and cache received videos. The default is true.",
+            "type": "boolean"
+          },
+          "voice": {
+            "description": "Download and cache received voice notes. The default is true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "image",
+          "sticker",
+          "file",
+          "video",
+          "voice"
+        ],
+        "type": "object"
+      },
+      "PurgeMediaCacheRequest": {
+        "additionalProperties": false,
+        "description": "Request to remove derived media cache entries.",
+        "properties": {
+          "olderThanSeconds": {
+            "description": "Remove only entries last read before this many seconds ago. Null removes everything.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PurgedMediaCache": {
+        "additionalProperties": false,
+        "description": "Derived media cache entries removed by one purge. The cache only holds\nregenerable bytes, so removing entries never loses account data.",
+        "properties": {
+          "bytes": {
+            "description": "How many bytes the removed files occupied.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "files": {
+            "description": "How many cache files were removed.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files",
+          "bytes"
+        ],
+        "type": "object"
+      },
       "QrQuery": {
         "additionalProperties": false,
         "description": "Options for fetching a login QR code.",
@@ -5444,6 +5558,243 @@
         ]
       }
     },
+    "/v1/accounts/{a}/friend-requests": {
+      "get": {
+        "operationId": "listFriendRequests",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "List the pending inbound contact requests derived from stored type-37 messages. Request material stays server-side.",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/friend-requests/{id}/accept": {
+      "post": {
+        "operationId": "acceptFriendRequest",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Contact ID of the applicant who sent the request.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeating a request with the same key returns the original result instead of repeating the work.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeOperation"
+                }
+              }
+            },
+            "description": "Accepted. The work continues in the background."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "send"
+            ]
+          }
+        ],
+        "summary": "Accept one applicant's newest stored contact request; material is read server-side. The account's gate must be open. Poll the returned operation.",
+        "tags": [
+          "contacts"
+        ],
+        "x-agent-wechat-sdk-response": [
+          {
+            "$ref": "#/components/schemas/NativeOperation"
+          }
+        ]
+      }
+    },
+    "/v1/accounts/{a}/friend-requests/{id}/decline": {
+      "post": {
+        "operationId": "declineFriendRequest",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Contact ID of the applicant who sent the request.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeating a request with the same key returns the original result instead of repeating the work.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeOperation"
+                }
+              }
+            },
+            "description": "Accepted. The work continues in the background."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "send"
+            ]
+          }
+        ],
+        "summary": "Decline one applicant's newest stored contact request; material is read server-side. The account's gate must be open. Poll the returned operation.",
+        "tags": [
+          "contacts"
+        ],
+        "x-agent-wechat-sdk-response": [
+          {
+            "$ref": "#/components/schemas/NativeOperation"
+          }
+        ]
+      }
+    },
+    "/v1/accounts/{a}/friend-requests/{id}/preflight": {
+      "get": {
+        "operationId": "preflightFriendRequest",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Contact ID of the applicant who sent the request.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Check whether one applicant's newest stored contact request can be accepted. Does not contact the service.",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
     "/v1/accounts/{a}/group-mutations/by-idempotency-key": {
       "get": {
         "operationId": "getGroupMutationByKey",
@@ -7149,6 +7500,65 @@
         ]
       }
     },
+    "/v1/accounts/{a}/media-cache/purge": {
+      "post": {
+        "operationId": "purgeMediaCache",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeMediaCacheRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "media"
+            ]
+          }
+        ],
+        "summary": "Remove derived cache entries of this account, all of them or only those last read before an age. The cache only holds regenerable bytes, so nothing in the account is lost.",
+        "tags": [
+          "media"
+        ],
+        "x-agent-wechat-sdk-response": [
+          {
+            "$ref": "#/components/schemas/PurgedMediaCache"
+          }
+        ]
+      }
+    },
     "/v1/accounts/{a}/media-writeback/repair": {
       "post": {
         "operationId": "repairMediaWriteback",
@@ -8386,7 +8796,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AccountSettings"
+                "$ref": "#/components/schemas/AccountSettingsInput"
               }
             }
           },
@@ -8423,7 +8833,7 @@
         ],
         "x-agent-wechat-sdk-request": [
           {
-            "$ref": "#/components/schemas/AccountSettings"
+            "$ref": "#/components/schemas/AccountSettingsInput"
           }
         ],
         "x-agent-wechat-sdk-response": [

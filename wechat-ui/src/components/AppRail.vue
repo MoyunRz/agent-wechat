@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { wechatApi } from '../api'
 import { connectionLabel, connectionTone } from '../format'
-import type { AccountSummary, RailView, ThemeMode, UiTheme } from '../types'
+import type { AccountSettings, AccountSummary, ProactiveCacheKinds, RailView, ThemeMode, UiTheme } from '../types'
 import Icon from './Icon.vue'
 import ThreadAvatar from './ThreadAvatar.vue'
 
@@ -87,6 +88,9 @@ function toggleAccountMenu(): void {
 function toggleSettings(): void {
   accountMenuOpen.value = false
   settingsOpen.value = !settingsOpen.value
+  // 打开时按需拉取账号级缓存设置（仅首次）。
+  if (settingsOpen.value)
+    void ensureCacheSettings()
 }
 
 function closeMenus(): void {
@@ -121,6 +125,113 @@ function onToastDurationInput(event: Event): void {
 /** 徽标文案：超过 99 显示 99+。 */
 function badgeText(count: number): string {
   return count > 99 ? '99+' : String(count)
+}
+
+// —— 媒体缓存：主动缓存开关 + 按时间清理（daemon 账号设置与派生缓存） ——
+const CACHE_KIND_ITEMS: ReadonlyArray<{ key: keyof ProactiveCacheKinds, label: string, hint: string }> = [
+  { key: 'image', label: '图片', hint: '收到的图片' },
+  { key: 'sticker', label: '表情', hint: '表情与贴纸' },
+  { key: 'file', label: '文件', hint: '收到的文件' },
+  { key: 'video', label: '视频', hint: '收到的视频' },
+  { key: 'voice', label: '语音', hint: '语音消息' },
+]
+
+const CACHE_AGE_OPTIONS: ReadonlyArray<{ label: string, seconds: number | null }> = [
+  { label: '24 小时', seconds: 24 * 3600 },
+  { label: '3 天', seconds: 3 * 24 * 3600 },
+  { label: '7 天', seconds: 7 * 24 * 3600 },
+  { label: '14 天', seconds: 14 * 24 * 3600 },
+  { label: '30 天', seconds: 30 * 24 * 3600 },
+  { label: '全部', seconds: null },
+]
+
+const DEFAULT_PROACTIVE: ProactiveCacheKinds = { image: true, sticker: true, file: true, video: true, voice: true }
+
+const cacheSettings = ref<AccountSettings | null>(null)
+const cacheLoading = ref(false)
+const cacheSavingKey = ref<string | null>(null)
+const cacheError = ref('')
+const purging = ref(false)
+const purgeResult = ref('')
+
+/** 打开设置面板时按需拉取一次账号设置；失败只显示错误，不打断其它设置项。 */
+async function ensureCacheSettings(): Promise<void> {
+  if (cacheSettings.value || cacheLoading.value)
+    return
+  cacheLoading.value = true
+  cacheError.value = ''
+  try {
+    const settings = await wechatApi.getAccountSettings(props.account.id)
+    cacheSettings.value = settings
+    if (!settings.proactiveCache) {
+      cacheSettings.value = { ...settings, proactiveCache: DEFAULT_PROACTIVE }
+    }
+  }
+  catch (error) {
+    cacheError.value = error instanceof Error ? error.message : '读取设置失败'
+  }
+  finally {
+    cacheLoading.value = false
+  }
+}
+
+/** 乐观更新一处开关；保存失败回滚并提示。 */
+async function toggleCacheKind(key: keyof ProactiveCacheKinds): Promise<void> {
+  const settings = cacheSettings.value
+  const current = settings?.proactiveCache
+  if (!settings || !current || cacheSavingKey.value || cacheLoading.value)
+    return
+  const next: ProactiveCacheKinds = { ...current, [key]: !current[key] }
+  cacheSettings.value = { ...settings, proactiveCache: next }
+  cacheSavingKey.value = key
+  cacheError.value = ''
+  try {
+    await wechatApi.updateAccountSettings(props.account.id, {
+      autoDownloadMaxBytes: settings.autoDownloadMaxBytes,
+      proactiveCache: next,
+    })
+  }
+  catch (error) {
+    cacheSettings.value = { ...settings, proactiveCache: current }
+    cacheError.value = error instanceof Error ? error.message : '保存失败'
+  }
+  finally {
+    cacheSavingKey.value = null
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024)
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+  if (bytes >= 1024 * 1024)
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024)
+    return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
+/** 清理当前账号的派生媒体缓存；confirm 挡住误触，结果用一行文案反馈。 */
+async function purgeCache(seconds: number | null): Promise<void> {
+  if (purging.value)
+    return
+  const label = CACHE_AGE_OPTIONS.find(option => option.seconds === seconds)?.label ?? '全部'
+  if (!window.confirm(`清理 ${label}之前的媒体缓存？只删除加速缓存文件，不影响聊天记录和收到的消息。`))
+    return
+  purging.value = true
+  purgeResult.value = ''
+  cacheError.value = ''
+  try {
+    const result = await wechatApi.purgeMediaCache(props.account.id, seconds)
+    purgeResult.value = result.files > 0
+      ? `已清理 ${result.files} 个缓存文件 · ${formatBytes(result.bytes)}`
+      : '没有需要清理的缓存'
+  }
+  catch (error) {
+    cacheError.value = error instanceof Error ? error.message : '清理失败'
+  }
+  finally {
+    purging.value = false
+  }
 }
 </script>
 
@@ -398,6 +509,58 @@ function badgeText(count: number): string {
             :value="toastSeconds"
             @input="onToastDurationInput"
           >
+        </div>
+
+        <!-- 主动缓存：收到对应类型的消息时，daemon 自动下载并缓存，聊天打开即秒出。 -->
+        <div class="settings-section">
+          <div class="settings-row">
+            <span class="settings-label">主动缓存</span>
+            <span v-if="cacheLoading" class="settings-value">读取中…</span>
+          </div>
+          <div class="cache-kind-list">
+            <div
+              v-for="item in CACHE_KIND_ITEMS"
+              :key="item.key"
+              class="cache-kind-row"
+              :class="{ saving: cacheSavingKey === item.key }"
+              role="switch"
+              :aria-checked="cacheSettings?.proactiveCache?.[item.key] ?? true"
+              tabindex="0"
+              @click="toggleCacheKind(item.key)"
+              @keydown.enter.prevent="toggleCacheKind(item.key)"
+            >
+              <span class="cache-kind-text">
+                <span class="cache-kind-name">{{ item.label }}</span>
+                <span class="cache-kind-hint">{{ item.hint }}</span>
+              </span>
+              <span
+                class="toggle-switch"
+                :class="{ on: cacheSettings?.proactiveCache?.[item.key] ?? true }"
+              >
+                <span class="toggle-knob" />
+              </span>
+            </div>
+          </div>
+          <span v-if="cacheError" class="cache-error">{{ cacheError }}</span>
+        </div>
+
+        <!-- 缓存清理：删除派生加速缓存文件（按最后使用时间），不动聊天记录。 -->
+        <div class="settings-section">
+          <span class="settings-label">清理媒体缓存</span>
+          <div class="cache-purge-grid">
+            <button
+              v-for="option in CACHE_AGE_OPTIONS"
+              :key="option.label"
+              type="button"
+              class="cache-purge-btn"
+              :disabled="purging"
+              @click="purgeCache(option.seconds)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+          <span v-if="purgeResult" class="cache-purge-result">{{ purgeResult }}</span>
+          <span v-if="purging" class="settings-value">清理中…</span>
         </div>
       </section>
     </Transition>
@@ -913,6 +1076,94 @@ function badgeText(count: number): string {
 .font-slider {
   width: 100%;
   accent-color: var(--accent);
+}
+
+/* 媒体缓存：主动缓存开关行 + 清理按钮组 */
+.cache-kind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -3px;
+  padding: 2px;
+  border-radius: 10px;
+}
+
+.cache-kind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.14s ease, opacity 0.14s ease;
+}
+
+.cache-kind-row:hover,
+.cache-kind-row:focus-visible {
+  background: var(--panel-hover);
+  outline: none;
+}
+
+.cache-kind-row.saving {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.cache-kind-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cache-kind-name {
+  color: var(--text-soft);
+  font-size: 11.5px;
+}
+
+.cache-kind-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cache-error {
+  color: var(--danger-text, #f87171);
+  font-size: 10.5px;
+}
+
+.cache-purge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.cache-purge-btn {
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text-soft);
+  font-size: 11px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cache-purge-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger-text, #f87171) 35%, transparent);
+  color: var(--danger-text, #f87171);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.cache-purge-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.cache-purge-result {
+  color: var(--muted);
+  font-size: 10.5px;
 }
 
 .fade-enter-active,

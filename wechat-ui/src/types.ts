@@ -354,3 +354,24 @@ export type LocalMessage = Message & {
   sendId?: string
   localMedia?: LocalMedia
 }
+
+/** 主动缓存开关：对应 daemon 账号设置里的 proactiveCache，全部默认开启。 */
+export type ProactiveCacheKinds = {
+  image: boolean
+  sticker: boolean
+  file: boolean
+  video: boolean
+  voice: boolean
+}
+
+/** daemon 账号设置；proactiveCache 在 GET 里总是返回当前值。 */
+export type AccountSettings = {
+  autoDownloadMaxBytes: number
+  proactiveCache: ProactiveCacheKinds | null
+}
+
+/** 一次媒体缓存清理移除的文件数与字节数。 */
+export type PurgedMediaCache = {
+  files: number
+  bytes: number
+}

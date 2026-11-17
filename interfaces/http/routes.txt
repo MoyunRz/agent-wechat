@@ -4,6 +4,12 @@
 # `request` and `response` rows list the fields of each typed payload. A type that the SDK declares but the handler does not return is listed too. Query strings are request fields.
 request AccountSettings | object, rejects unknown fields | Hub policy; this is never written into an official WeChat profile.
 request AccountSettings.autoDownloadMaxBytes | integer, required, min 0, format uint64 | Largest advertised size in bytes that the daemon downloads automatically for this account, from 0 to 536870912. Thumbnails and voice notes are always downloaded, and 0 limits automatic downloads to those; the default is 52428800.
+request AccountSettings.proactiveCache | object, nullable, default null, rejects unknown fields | Which message kinds arrive already downloaded and cached. Every kind is on by default. A request that omits this keeps the kinds the account already has.
+request AccountSettings.proactiveCache.file | boolean, required | Download and cache received files. The default is true.
+request AccountSettings.proactiveCache.image | boolean, required | Download and cache received images. The default is true.
+request AccountSettings.proactiveCache.sticker | boolean, required | Download and cache received stickers and emoji. The default is true.
+request AccountSettings.proactiveCache.video | boolean, required | Download and cache received videos. The default is true.
+request AccountSettings.proactiveCache.voice | boolean, required | Download and cache received voice notes. The default is true.
 request ContactLookupRequest | object, rejects unknown fields | Request to look up several contacts.
 request ContactLookupRequest.ids | array of string, required | Contact IDs to look up.
 request ContentQuery | object, rejects unknown fields | Options for fetching media bytes.
@@ -97,6 +103,8 @@ request PageQuery.cursor | string, nullable | The `nextCursor` of the previous p
 request PageQuery.kind | string, nullable | Only list chats of this kind: `direct`, `group` or `system`.
 request PageQuery.limit | integer, nullable, min 0, format uint | Items per page, from 1 to 200.
 request PageQuery.search | string, nullable | Text to search for, up to 256 characters. The name `query` is accepted too.
+request PurgeMediaCacheRequest | object, rejects unknown fields | Request to remove derived media cache entries.
+request PurgeMediaCacheRequest.olderThanSeconds | integer, nullable, min 0, format uint64 | Remove only entries last read before this many seconds ago. Null removes everything.
 request QrQuery | object, rejects unknown fields | Options for fetching a login QR code.
 request QrQuery.generation | integer, nullable, min 0, format uint64 | Only return the QR code if it is still this generation. A newer code fails with `login_challenge_superseded`.
 request RefreshAvatarRequest | object, rejects unknown fields | Optional group context for an OpenIM member's avatar lookup.
@@ -122,6 +130,12 @@ request UpdateAccountRequest.alias | string, nullable | The new alias.
 request UpdateAccountRequest.autoConnect | boolean, nullable | Whether the account connects automatically when the daemon starts.
 response AccountSettings | object | Hub policy; this is never written into an official WeChat profile.
 response AccountSettings.autoDownloadMaxBytes | integer, required, min 0, format uint64 | Largest advertised size in bytes that the daemon downloads automatically for this account, from 0 to 536870912. Thumbnails and voice notes are always downloaded, and 0 limits automatic downloads to those; the default is 52428800.
+response AccountSettings.proactiveCache | object, required, nullable | Which message kinds arrive already downloaded and cached. Every kind is on by default. A request that omits this keeps the kinds the account already has.
+response AccountSettings.proactiveCache.file | boolean, required | Download and cache received files. The default is true.
+response AccountSettings.proactiveCache.image | boolean, required | Download and cache received images. The default is true.
+response AccountSettings.proactiveCache.sticker | boolean, required | Download and cache received stickers and emoji. The default is true.
+response AccountSettings.proactiveCache.video | boolean, required | Download and cache received videos. The default is true.
+response AccountSettings.proactiveCache.voice | boolean, required | Download and cache received voice notes. The default is true.
 response CallSnapshot | object | The state of calling for one account, as returned by the HTTP snapshot route. The `hello` event carries the same fields.
 response CallSnapshot.audioFormat | object, required | The PCM format used for call audio.
 response CallSnapshot.audioFormat.channels | integer, required, min 0, max 255, format uint8 | Number of interleaved channels.
@@ -720,6 +734,9 @@ response OwnedMediaSource.id | string, required | Source ID. Pass it as `sourceI
 response OwnedMediaSource.mediaType | string, required | MIME type given at upload.
 response OwnedMediaSource.name | string, required | File name given at upload.
 response OwnedMediaSource.sha256 | string, required | SHA-256 of the file's bytes, as lowercase hex.
+response PurgedMediaCache | object | Derived media cache entries removed by one purge. The cache only holds regenerable bytes, so removing entries never loses account data.
+response PurgedMediaCache.bytes | integer, required, min 0, format uint64 | How many bytes the removed files occupied.
+response PurgedMediaCache.files | integer, required, min 0, format uint64 | How many cache files were removed.
 route DELETE /v1/access-tokens/{id} | scope owner token, response untyped | Revoke an API token so it stops working.
 route DELETE /v1/accounts/{a} | scope admin, request NativeAccountRemovalRequest, response NativeAccountRemoval, sdk response NativeAccountRemoval | Unregister a signed-out account. Its local files are kept. The body must repeat the account ID to confirm.
 route DELETE /v1/accounts/{a}/groups/{id}/announcement | scope admin, idempotency key required, response NativeOperation, status 202, sdk response NativeOperation | Clear the announcement of a group.
@@ -741,6 +758,8 @@ route GET /v1/accounts/{a}/contacts/{id} | scope read, response NativeContact, s
 route GET /v1/accounts/{a}/event-log | scope read, query EventQuery, response untyped or sse NativeEvent, sdk response NativeEvent | Read events after a cursor as a JSON page. With Accept: text/event-stream it streams them instead.
 route GET /v1/accounts/{a}/events | scope read, query EventQuery, response untyped or sse NativeEvent, sdk response NativeEvent | Read events after a cursor as a JSON page. With Accept: text/event-stream it streams them instead.
 route GET /v1/accounts/{a}/events/stream | scope read, query EventQuery, response sse NativeEvent, sdk response NativeEvent | Stream events as server-sent events, resuming after a cursor or Last-Event-ID.
+route GET /v1/accounts/{a}/friend-requests | scope read, response untyped | List the pending inbound contact requests derived from stored type-37 messages. Request material stays server-side.
+route GET /v1/accounts/{a}/friend-requests/{id}/preflight | scope read, response untyped | Check whether one applicant's newest stored contact request can be accepted. Does not contact the service.
 route GET /v1/accounts/{a}/group-mutations/by-idempotency-key | scope admin, query GroupMutationKeyQuery, response NativeOperation, sdk response NativeOperation | Find a group change by the Idempotency-Key it was submitted with.
 route GET /v1/accounts/{a}/groups | scope read, query PageQuery, response NativeGroupPage, sdk response NativePage<NativeGroup> | List the saved groups.
 route GET /v1/accounts/{a}/groups/{id} | scope read, response NativeGroup, sdk response NativeGroup | Show one saved group.
@@ -785,6 +804,8 @@ route POST /v1/accounts/{a}/contacts/verify-user/gate | scope send, request Nati
 route POST /v1/accounts/{a}/contacts/{id}/refresh | scope read, response untyped, status 202, sdk response NativeOperation | Ask WeChat for the latest details of one contact. Poll the returned operation.
 route POST /v1/accounts/{a}/disconnect | scope login, response untyped | Close the connection to WeChat but keep the saved login trust.
 route POST /v1/accounts/{a}/forget-credentials | scope login, idempotency key required, request NativeForgetRequest, response untyped, status 202, sdk response NativeOperation | Delete the saved login credentials of the account. The body must confirm.
+route POST /v1/accounts/{a}/friend-requests/{id}/accept | scope send, idempotency key required, response NativeOperation, status 202, sdk response NativeOperation | Accept one applicant's newest stored contact request; material is read server-side. The account's gate must be open. Poll the returned operation.
+route POST /v1/accounts/{a}/friend-requests/{id}/decline | scope send, idempotency key required, response NativeOperation, status 202, sdk response NativeOperation | Decline one applicant's newest stored contact request; material is read server-side. The account's gate must be open. Poll the returned operation.
 route POST /v1/accounts/{a}/group-sync | scope read, response untyped, status 202, sdk response NativeOperation | Start syncing the group catalog from WeChat. Poll the returned operation.
 route POST /v1/accounts/{a}/groups | scope admin, idempotency key required, request NativeGroupCreateRequest, response NativeOperation, status 202, sdk request NativeGroupCreateRequest, sdk response NativeOperation | Create a group chat with the chosen members. Poll the returned operation.
 route POST /v1/accounts/{a}/groups/{id}/leave | scope admin, idempotency key required, response NativeOperation, status 202, sdk response NativeOperation | Leave a group.
@@ -797,6 +818,7 @@ route POST /v1/accounts/{a}/jobs/{id}/retry-completed-upload | scope send, reque
 route POST /v1/accounts/{a}/login-attempts | scope login, idempotency key optional, request LoginRequest, response NativeOperation, status 202, sdk request LoginRequest, sdk response NativeOperation | Start signing the account in with a saved device or a QR code. Poll the returned operation.
 route POST /v1/accounts/{a}/login-attempts/{id}/cancel | scope varies, response NativeOperation, sdk response NativeOperation | Cancel a login attempt. Scope: Needs read, login, media or send to look the operation up, then its kind decides: login, logout and forget_credentials need login; media-writeback needs media; message_recall needs send; sync and metadata need read; every other kind needs admin.
 route POST /v1/accounts/{a}/logout | scope login, idempotency key required, response untyped, status 202, sdk response NativeOperation | Sign the account out of WeChat. Poll the returned operation.
+route POST /v1/accounts/{a}/media-cache/purge | scope media, request PurgeMediaCacheRequest, response untyped, sdk response PurgedMediaCache | Remove derived cache entries of this account, all of them or only those last read before an age. The cache only holds regenerable bytes, so nothing in the account is lost.
 route POST /v1/accounts/{a}/media-writeback/repair | scope media, request NativeMediaWritebackRequest, response untyped, status 202, sdk response NativeOperation | Start repairing saved media records from bytes the daemon already holds. It never resends or downloads.
 route POST /v1/accounts/{a}/media/lookup | scope media, request NativeMediaBatchRequest, response untyped, sdk response NativeMediaBatch | List the media of up to 40 messages in one request, without downloading anything.
 route POST /v1/accounts/{a}/messages/{id}/media-transfers | scope media, request MediaTransferRequest, response untyped, status 202, sdk request MediaTransferRequest, sdk response MediaJob | Start downloading one media file of a message. Poll the returned job.

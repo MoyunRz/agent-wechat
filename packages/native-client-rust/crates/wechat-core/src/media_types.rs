@@ -241,6 +241,16 @@ pub struct MediaContent {
     pub filename: Option<String>,
     pub source_sha256: Option<String>,
 }
+/// Derived media cache entries removed by one purge. The cache only holds
+/// regenerable bytes, so removing entries never loses account data.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PurgedMediaCache {
+    /// How many cache files were removed.
+    pub files: u64,
+    /// How many bytes the removed files occupied.
+    pub bytes: u64,
+}
 
 #[cfg(test)]
 mod tests {

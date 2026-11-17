@@ -25,6 +25,7 @@ const wechat_protocol::silk::MAX_SAMPLES | usize | MISSING DOC
 const wechat_protocol::silk::MAX_STREAM_BYTES | usize | Largest stream accepted by framing validation and decoding.
 const wechat_protocol::silk::SAMPLE_RATE | u32 | MISSING DOC
 const wechat_protocol::verify_user::ACCEPT_OPCODE | u32 | Opcode accepting the contact request carried in field9.
+const wechat_protocol::verify_user::DECLINE_OPCODE | u32 | Opcode declining the contact request carried in field9. Candidate from the protocol spec {2=request, 3=accept, 4=decline}; the signed service reply validates it during rollout.
 enum wechat_protocol::AccountInterrupted | #[non_exhaustive] enum | Why the account owner ended a request or a notification wait. This says nothing about whether bytes were sent; check [`NativeRequestNotSubmitted`](crate::NativeRequestNotSubmitted) for that.
 enum wechat_protocol::AccountLifecycle | enum | MISSING DOC
 enum wechat_protocol::GroupMutation | enum | MISSING DOC
@@ -234,6 +235,7 @@ field wechat_protocol::VerifyUserAcceptReply::service_code | i32 | Signed servic
 field wechat_protocol::VerifyUserAcceptRequest::encrypt_username | alloc::string::String | Encryptusername supplied with the inbound contact request.
 field wechat_protocol::VerifyUserAcceptRequest::scene | u32 | Scene value supplied with the inbound contact request.
 field wechat_protocol::VerifyUserAcceptRequest::ticket | alloc::string::String | Ticket supplied with the inbound contact request.
+field wechat_protocol::VerifyUserAcceptRequest::username | alloc::string::String | Applicant username (wxid) supplied with the inbound contact request. The official fill code puts this string into the VerifyUser entry.
 field wechat_protocol::VoiceChunk::bytes | alloc::vec::Vec<u8> | MISSING DOC
 field wechat_protocol::VoiceChunk::complete | bool | MISSING DOC
 field wechat_protocol::VoiceChunk::echoed_server_id | core::option::Option<alloc::string::String> | MISSING DOC
@@ -572,6 +574,7 @@ field wechat_protocol::verify_user::VerifyUserAcceptReply::service_code | i32 | 
 field wechat_protocol::verify_user::VerifyUserAcceptRequest::encrypt_username | alloc::string::String | Encryptusername supplied with the inbound contact request.
 field wechat_protocol::verify_user::VerifyUserAcceptRequest::scene | u32 | Scene value supplied with the inbound contact request.
 field wechat_protocol::verify_user::VerifyUserAcceptRequest::ticket | alloc::string::String | Ticket supplied with the inbound contact request.
+field wechat_protocol::verify_user::VerifyUserAcceptRequest::username | alloc::string::String | Applicant username (wxid) supplied with the inbound contact request. The official fill code puts this string into the VerifyUser entry.
 field wechat_protocol::wire::AddMessage::content | alloc::vec::Vec<u8> | MISSING DOC
 field wechat_protocol::wire::AddMessage::content_text | core::option::Option<alloc::string::String> | MISSING DOC
 field wechat_protocol::wire::AddMessage::created_at | u32 | MISSING DOC
@@ -691,6 +694,7 @@ fn wechat_protocol::AccountRequest::send_voice | fn(&mut self, destination: &str
 fn wechat_protocol::AccountRequest::sync | fn(&mut self, cursor: &[u8]) -> anyhow::Result<wechat_protocol::wire::SyncBatch> | MISSING DOC
 fn wechat_protocol::AccountRequest::sync_scene | fn(&mut self, cursor: &[u8], scene: u32) -> anyhow::Result<wechat_protocol::wire::SyncBatch> | MISSING DOC
 fn wechat_protocol::AccountRequest::verify_user_accept | fn(&mut self, request: &wechat_protocol::verify_user::VerifyUserAcceptRequest) -> anyhow::Result<wechat_protocol::verify_user::VerifyUserAcceptReply> | MISSING DOC
+fn wechat_protocol::AccountRequest::verify_user_decline | fn(&mut self, request: &wechat_protocol::verify_user::VerifyUserAcceptRequest) -> anyhow::Result<wechat_protocol::verify_user::VerifyUserAcceptReply> | MISSING DOC
 fn wechat_protocol::AccountState::from_baseline_json | fn(input: &[u8]) -> anyhow::Result<Self> | Import an operator-selected private baseline checkpoint. This only converts explicit standalone credentials; it never searches or reads official files. Return diagnostics contain field names, never supplied credential values.
 fn wechat_protocol::AccountState::validate | fn(&self) -> anyhow::Result<()> | MISSING DOC
 fn wechat_protocol::DeviceProfile::generate | fn(device_type: alloc::string::String) -> anyhow::Result<Self> | MISSING DOC
@@ -1029,8 +1033,13 @@ fn wechat_protocol::silk::decode | fn(input: &[u8]) -> anyhow::Result<alloc::vec
 fn wechat_protocol::silk::encode | fn(pcm: &[i16]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
 fn wechat_protocol::silk::validate_framing | fn(input: &[u8]) -> anyhow::Result<u32> | MISSING DOC
 fn wechat_protocol::silk::wav | fn(pcm: &[i16]) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
+fn wechat_protocol::trace::enabled | fn() -> bool | Whether chain tracing is enabled (`WX_PROTOCOL_TRACE=1`).
+fn wechat_protocol::trace::head | fn(bytes: &[u8], max: usize) -> alloc::string::String | Hex head of at most `max` bytes, prefixed with the total length.
+fn wechat_protocol::trace::shape | fn(bytes: &[u8]) -> alloc::string::String | Compact top-level protobuf shape: field number, wire kind, and size or varint value. Messages are described without their contents.
+fn wechat_protocol::trace::stage | fn(name: &str, fields: &[(&str, alloc::string::String)]) | Emit one trace line. `fields` are key/value pairs appended after the stage.
 fn wechat_protocol::verify_user::VerifyUserAcceptReply::accepted | fn(&self) -> bool | Whether the service accepted the action.
 fn wechat_protocol::verify_user::decode_response | fn(bytes: &[u8]) -> anyhow::Result<wechat_protocol::verify_user::VerifyUserAcceptReply> | Decode an authenticated verifyuser reply, preserving signed rejections.
+fn wechat_protocol::verify_user::encoded | fn(state: &wechat_protocol::client::AccountState, input: &wechat_protocol::verify_user::VerifyUserAcceptRequest, opcode: u32) -> anyhow::Result<alloc::vec::Vec<u8>> | Encode one contact-request action (accept or decline) with the account's BaseRequest. The wire layout is identical; only the opcode differs.
 fn wechat_protocol::verify_user::request | fn(state: &wechat_protocol::client::AccountState, input: &wechat_protocol::verify_user::VerifyUserAcceptRequest) -> anyhow::Result<alloc::vec::Vec<u8>> | Encode one contact-request acceptance with the account's BaseRequest.
 fn wechat_protocol::wire::apply_cursor | fn(prior: &[u8], incoming: &[u8], code: i32) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
 fn wechat_protocol::wire::auto_auth | fn(state: &wechat_protocol::client::AccountState, point: &[u8], computer_name: &str) -> anyhow::Result<alloc::vec::Vec<u8>> | MISSING DOC
@@ -1591,6 +1600,7 @@ mod wechat_protocol::protobuf | - | Bounded numbered protobuf primitives. Unknow
 mod wechat_protocol::push | - | Persistent authenticated incoming notifications. The outer longlink command is distinct from the encrypted business CGI: heartbeat 238/518, sync 121/138.
 mod wechat_protocol::quote_send | - | Quoted app-message metadata. Callers resolve the selected message and persist this reference and the final XML before submitting a send attempt.
 mod wechat_protocol::silk | - | Bounded independent SILK SDK wrapper. Public source/license pins are under vendor/silk; no WeChat codec library is linked or loaded.
+mod wechat_protocol::trace | - | Protocol chain tracing for grey-scale debugging.
 mod wechat_protocol::verify_user | - | Accept one inbound contact request through the supported contact operation.
 mod wechat_protocol::wire | - | Typed numbered business messages for the supported native profile.
 struct wechat_protocol::AccountIdentity | struct { public fields } | MISSING DOC

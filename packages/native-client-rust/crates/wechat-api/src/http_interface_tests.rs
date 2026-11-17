@@ -54,6 +54,8 @@ payloads! {
     "SendKeyQuery" => crate::actions::SendKeyQuery,
     "GroupMutationKeyQuery" => crate::groups::GroupMutationKeyQuery,
     "ContentQuery" => crate::media::ContentQuery,
+    "PurgeMediaCacheRequest" => crate::media::PurgeMediaCacheRequest,
+    "PurgedMediaCache" => wechat_core::PurgedMediaCache,
     "OfficialProfileRequest" => wechat_core::OfficialProfileRequest,
     "OfficialProfileSelection" => wechat_core::OfficialProfileSelection,
     "LoginRequest" => wechat_core::LoginRequest,
@@ -257,6 +259,7 @@ fn param_doc(path: &str, name: &str) -> String {
                 "media" => "Media asset ID.",
                 "jobs" => "Job ID.",
                 "groups" => "Group ID.",
+                "friend-requests" => "Contact ID of the applicant who sent the request.",
                 other => panic!("describe the {{id}} parameter after /{other}/"),
             }
         }

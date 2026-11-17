@@ -152,6 +152,9 @@ pub struct CoreShared {
     pub(crate) official_profiles: AsyncMutex<()>,
     pub stopping: AtomicBool,
     pub(crate) read_pools: Mutex<BTreeMap<String, Arc<crate::read_view::ReadPool>>>,
+    /// Derived cache of decoded media bytes; entries are regenerable, so
+    /// removing the directory never loses account data.
+    pub(crate) media_cache: crate::media_cache::MediaDiskCache,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,
@@ -350,6 +353,7 @@ impl Core {
             })
             .map(|a| a.id)
             .collect();
+        let media_cache_root = store.root.join("media-cache");
         let core = Arc::new(Self {
             store,
             snapshot_reader: None,
@@ -388,6 +392,7 @@ impl Core {
                 official_profiles: AsyncMutex::new(()),
                 stopping: AtomicBool::new(false),
                 read_pools: Mutex::new(BTreeMap::new()),
+                media_cache: crate::media_cache::MediaDiskCache::new(media_cache_root),
             }),
         });
         for account in core.store.accounts()? {

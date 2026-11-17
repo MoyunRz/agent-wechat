@@ -33,6 +33,10 @@ pub(super) fn routes() -> Router<App> {
         )
         .api_route("/v1/accounts/{a}/media/{id}", get(asset))
         .api_route("/v1/accounts/{a}/media/{id}/content", get(content))
+        .api_route(
+            "/v1/accounts/{a}/media-cache/purge",
+            post(purge_media_cache),
+        )
         .api_route("/v1/accounts/{a}/jobs/{id}", get(job))
         .api_route("/v1/accounts/{a}/jobs/{id}/cancel", post(cancel_job))
         .api_route("/v1/accounts/{a}/jobs/{id}/retry", post(retry_job))
@@ -44,6 +48,24 @@ pub(super) fn routes() -> Router<App> {
             "/v1/accounts/{a}/media-writeback/repair",
             post(repair_writeback),
         )
+}
+/// Request to remove derived media cache entries.
+#[derive(Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PurgeMediaCacheRequest {
+    /// Remove only entries last read before this many seconds ago. Null removes everything.
+    pub older_than_seconds: Option<u64>,
+}
+async fn purge_media_cache(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<PurgeMediaCacheRequest>,
+) -> ApiResult<Json<wechat_core::PurgedMediaCache>> {
+    c.require(Some(&a), "media")?;
+    Ok(Json(
+        app.core.purge_media_cache(&a, input.older_than_seconds)?,
+    ))
 }
 async fn repair_writeback(
     State(app): State<App>,

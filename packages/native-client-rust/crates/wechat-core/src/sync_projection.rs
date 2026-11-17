@@ -2746,6 +2746,7 @@ mod automatic_voice_tests {
                 "one",
                 &wechat_store::AccountSettings {
                     auto_download_max_bytes: 100,
+                    proactive_cache: None,
                 },
             )
             .unwrap();
@@ -2789,6 +2790,7 @@ mod automatic_voice_tests {
                 "one",
                 &wechat_store::AccountSettings {
                     auto_download_max_bytes: 0,
+                    proactive_cache: None,
                 },
             )
             .unwrap();

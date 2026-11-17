@@ -11,6 +11,7 @@ pub use links::{LinkCard, ShareSendRequest};
 mod locations;
 pub use locations::{LocationCard, LocationCoordinateSystem};
 mod media;
+mod media_cache;
 mod mention_send;
 pub use mention_send::{TextMentionPosition, TextMentions};
 pub mod media_types;

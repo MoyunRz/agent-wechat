@@ -13,7 +13,11 @@ pub(super) fn advertised_length(plan: &DownloadPlan) -> Option<u64> {
         _ => None,
     }
 }
-pub(super) fn allowed(asset: &MediaAsset, limit: u64) -> bool {
+pub(super) fn allowed(
+    asset: &MediaAsset,
+    limit: u64,
+    kinds: &wechat_store::ProactiveCacheKinds,
+) -> bool {
     if matches!(
         asset.kind,
         MediaKind::Image | MediaKind::Video | MediaKind::Sticker
@@ -22,7 +26,7 @@ pub(super) fn allowed(asset: &MediaAsset, limit: u64) -> bool {
         return true;
     }
     if asset.kind == MediaKind::Voice {
-        return asset.variant == MediaVariant::Normal;
+        return kinds.allows("voice") && asset.variant == MediaVariant::Normal;
     }
     matches!(
         (asset.kind, asset.variant),
@@ -34,10 +38,21 @@ pub(super) fn allowed(asset: &MediaAsset, limit: u64) -> bool {
             MediaVariant::Normal | MediaVariant::Original
         ) | (MediaKind::File, MediaVariant::Original)
             | (MediaKind::Sticker, MediaVariant::Original)
-    ) && limit > 0
+    ) && kinds.allows(kind_name(asset.kind))
+        && limit > 0
         && asset
             .advertised_byte_length
             .is_some_and(|size| size > 0 && size <= limit)
+}
+/// The settings key name of one media kind.
+pub(super) fn kind_name(kind: MediaKind) -> &'static str {
+    match kind {
+        MediaKind::Image => "image",
+        MediaKind::Sticker => "sticker",
+        MediaKind::File => "file",
+        MediaKind::Video => "video",
+        MediaKind::Voice => "voice",
+    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -230,6 +230,17 @@ fn completed_upload_binding(plan: &SendPlan) -> Result<String> {
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+/// The image type of a decoded preview, from its byte signature. WXGF previews
+/// are always JPEG or PNG, and the decoder guarantees those formats.
+fn preview_image_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else {
+        None
+    }
+}
 fn validate_send_source_sizes(
     request: &MediaSendRequest,
     primary: u64,
@@ -388,11 +399,11 @@ impl Core {
             asset.advertised_byte_length =
                 automatic::advertised_length(&self.asset_plan(account, &row)?.plan);
         }
+        let settings = self.store.account_settings(account)?;
         asset.auto_download_allowed = Some(automatic::allowed(
             &asset,
-            self.store
-                .account_settings(account)?
-                .auto_download_max_bytes,
+            settings.auto_download_max_bytes,
+            &settings.proactive_cache.unwrap_or_default(),
         ));
         Ok(asset)
     }
@@ -405,20 +416,52 @@ impl Core {
         self.authorize_media_record(account, &row)?;
         let asset: MediaAsset = serde_json::from_value(row.metadata.clone())?;
         ensure!(asset.state == "available", "media_not_available");
-        let bytes = match row.payload.as_deref() {
-            Some(sealed) => {
-                let mut opened =
-                    self.vault
-                        .open_media_record(account, &format!("asset:{id}"), sealed)?;
-                std::mem::take(&mut *opened)
+        // Repeat requests read the previously decoded bytes from the derived
+        // cache. An entry is accepted only when it still matches the recorded
+        // hash; a damaged entry is dropped and the source is read again. The
+        // key includes where the bytes come from, so a switch between the
+        // account's own copy and the profile never serves the old source.
+        let cache_key = format!(
+            "content|{account}|{id}|{}|{}|{}",
+            row.kind,
+            row.variant,
+            if row.payload.is_some() {
+                "vault"
+            } else {
+                "profile"
+            },
+        );
+        let bytes = match self.media_cache.get(account, &cache_key) {
+            Some(bytes)
+                if asset.byte_length == Some(bytes.len() as u64)
+                    && asset.sha256.as_deref() == Some(digest(&bytes).as_str()) =>
+            {
+                bytes
             }
-            // No copy is kept here once the official profile holds the bytes.
-            None => {
-                let key = self
-                    .store
-                    .media_asset_profile_key(account, id)?
-                    .context("media_not_cached")?;
-                self.profile_media_bytes(account, &asset, &key)?
+            hit => {
+                if hit.is_some() {
+                    self.media_cache.remove(account, &cache_key);
+                }
+                let computed = match row.payload.as_deref() {
+                    Some(sealed) => {
+                        let mut opened = self.vault.open_media_record(
+                            account,
+                            &format!("asset:{id}"),
+                            sealed,
+                        )?;
+                        std::mem::take(&mut *opened)
+                    }
+                    // No copy is kept here once the official profile holds the bytes.
+                    None => {
+                        let key = self
+                            .store
+                            .media_asset_profile_key(account, id)?
+                            .context("media_not_cached")?;
+                        self.profile_media_bytes(account, &asset, &key)?
+                    }
+                };
+                self.media_cache.put(account, &cache_key, &computed);
+                computed
             }
         };
         ensure!(
@@ -437,9 +480,22 @@ impl Core {
             source_sha256: None,
         })
     }
+    /// Remove derived cache entries of one account. `older_than_seconds` of
+    /// None removes everything; otherwise only entries last read before the
+    /// cutoff. The cache only accelerates, so purging loses nothing.
+    pub fn purge_media_cache(
+        &self,
+        account: &str,
+        older_than_seconds: Option<u64>,
+    ) -> Result<PurgedMediaCache> {
+        let (files, bytes) = self
+            .media_cache
+            .purge(account, older_than_seconds.map(Duration::from_secs));
+        Ok(PurgedMediaCache { files, bytes })
+    }
     pub fn media_preview_content(&self, account: &str, id: &str) -> Result<MediaContent> {
-        // The preview is decoded from the verified source each time; no copy of
-        // it is stored.
+        // The preview is decoded from the verified source. The decoded bytes go
+        // to the derived cache, so a repeat request does not decode again.
         let original = self.media_content(account, id)?;
         let asset = self.media_asset(account, id)?;
         let preview = asset.preview.context("media_preview_unavailable")?;
@@ -447,11 +503,28 @@ impl Core {
             preview.source_sha256 == original.sha256,
             "media_integrity_failed"
         );
-        let decoded = Self::wxgf_preview(&original.bytes)?;
-        let sha256 = digest(&decoded.bytes);
+        let cache_key = format!("preview|{account}|{id}|{}", original.sha256);
+        let cached = self.media_cache.get(account, &cache_key).filter(|bytes| {
+            bytes.len() as u64 == preview.byte_length && preview_image_type(bytes).is_some()
+        });
+        let (sha256, bytes, content_type) = match cached {
+            Some(bytes) => {
+                let content_type = preview_image_type(&bytes).unwrap_or_default().to_string();
+                (digest(&bytes), bytes, content_type)
+            }
+            None => {
+                let decoded = Self::wxgf_preview(&original.bytes)?;
+                self.media_cache.put(account, &cache_key, &decoded.bytes);
+                (
+                    digest(&decoded.bytes),
+                    decoded.bytes,
+                    decoded.inspection.content_type,
+                )
+            }
+        };
         if sha256 != preview.sha256
-            || decoded.bytes.len() as u64 != preview.byte_length
-            || decoded.inspection.content_type != preview.content_type
+            || bytes.len() as u64 != preview.byte_length
+            || content_type != preview.content_type
         {
             // A different FFmpeg build can encode the same frame differently.
             // Record what is served now, so the next read of this attachment
@@ -459,8 +532,8 @@ impl Core {
             let mut described = self.media_asset(account, id)?;
             if let Some(recorded) = described.preview.as_mut() {
                 recorded.sha256 = sha256.clone();
-                recorded.byte_length = decoded.bytes.len() as u64;
-                recorded.content_type = decoded.inspection.content_type.clone();
+                recorded.byte_length = bytes.len() as u64;
+                recorded.content_type = content_type.clone();
             }
             self.store
                 .save_media_asset(account, id, &serde_json::to_value(&described)?, None)?;
@@ -468,8 +541,8 @@ impl Core {
         self.media_asset(account, id)?;
         Ok(MediaContent {
             sha256,
-            bytes: decoded.bytes,
-            content_type: decoded.inspection.content_type,
+            bytes,
+            content_type,
             filename: Some(preview.filename),
             source_sha256: Some(original.sha256),
         })
@@ -719,10 +792,8 @@ impl Core {
                 }
             }
         }
-        let limit = self
-            .store
-            .account_settings(account)?
-            .auto_download_max_bytes;
+        let settings = self.store.account_settings(account)?;
+        let limit = settings.auto_download_max_bytes;
         let mut out = vec![];
         for (kind, variant, plan, filename) in plans {
             let identity = digest(&serde_json::to_vec(&(
@@ -867,7 +938,11 @@ impl Core {
             }
             self.authorize_media_record(account, &self.store.media_asset(account, &id)?)?;
             asset.advertised_byte_length = automatic::advertised_length(&plan);
-            asset.auto_download_allowed = Some(automatic::allowed(&asset, limit));
+            asset.auto_download_allowed = Some(automatic::allowed(
+                &asset,
+                limit,
+                &settings.proactive_cache.unwrap_or_default(),
+            ));
             out.push(asset);
         }
         Ok(out)
@@ -1845,6 +1920,19 @@ impl Core {
         row.data["completedBytes"] = asset.byte_length.into();
         row.data["totalBytes"] = asset.byte_length.into();
         self.store.save_media_job(account, &row)?;
+        // Proactively fill the derived cache for received media, so opening
+        // the chat later reads a file instead of decoding again. Best effort:
+        // the next open decodes again when this fails.
+        if row.kind != "send"
+            && self
+                .store
+                .account_settings(account)?
+                .proactive_cache
+                .unwrap_or_default()
+                .allows(automatic::kind_name(asset.kind))
+        {
+            let _ = self.media_content(account, &asset.id);
+        }
         Ok(())
     }
 }

@@ -657,3 +657,49 @@ async fn startup_converts_an_earlier_database_in_the_background_without_blocking
     // It runs once per process.
     core.spawn_media_storage_maintenance().unwrap();
 }
+
+/// Repeat reads answer from the derived disk cache: the first read writes an
+/// entry, later reads return the same bytes, and a damaged entry is dropped
+/// and regenerated instead of being served.
+#[test]
+fn media_content_reads_use_and_repair_a_disk_cache() {
+    let (dir, core) = profile_core();
+    let bytes = b"synthetic sticker bytes";
+    sidecar_asset(&core, "st-cache-1", bytes);
+    assert_eq!(
+        core.media_content("one", "st-cache-1").unwrap().bytes,
+        bytes
+    );
+    // The first read left an entry under the store's cache directory.
+    let cache_root = dir.path().join("data/media-cache");
+    let entry = |root: &std::path::Path| -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        fn walk(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                if entry.file_type().unwrap().is_dir() {
+                    walk(&entry.path(), found);
+                } else {
+                    found.push(entry.path());
+                }
+            }
+        }
+        walk(root, &mut found);
+        found
+    };
+    let files = entry(&cache_root);
+    assert_eq!(files.len(), 1);
+    assert_eq!(std::fs::read(&files[0]).unwrap(), bytes);
+    // A second read serves the same bytes.
+    assert_eq!(
+        core.media_content("one", "st-cache-1").unwrap().bytes,
+        bytes
+    );
+    // Damaging the entry cannot corrupt an answer: it is dropped and the
+    // source is read again.
+    std::fs::write(&files[0], b"garbage").unwrap();
+    assert_eq!(
+        core.media_content("one", "st-cache-1").unwrap().bytes,
+        bytes
+    );
+    assert_eq!(entry(&cache_root).len(), 1);
+}

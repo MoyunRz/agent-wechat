@@ -1,4 +1,5 @@
 import type {
+  AccountSettings,
   AccountSummary,
   Contact,
   ContactLookupResponse,
@@ -15,6 +16,7 @@ import type {
   Operation,
   OwnedMediaSource,
   PendingFriendRequest,
+  PurgedMediaCache,
   SendIntent,
   TextMentions,
   Thread,
@@ -398,6 +400,29 @@ export const wechatApi = {
 
   getOperation(accountId: string, operationId: string): Promise<Operation> {
     return request<Operation>(`/accounts/${enc(accountId)}/operations/${enc(operationId)}`)
+  },
+
+  /** 账号级 hub 设置（自动下载上限、主动缓存开关）；GET 返回的是当前值。 */
+  getAccountSettings(accountId: string): Promise<AccountSettings> {
+    return request<AccountSettings>(`/accounts/${enc(accountId)}/settings`)
+  },
+
+  /** PATCH 设置：proactiveCache 省略时 daemon 保留原值，这里总是显式提交全量开关。 */
+  updateAccountSettings(accountId: string, settings: AccountSettings): Promise<AccountSettings> {
+    return jsonRequest<AccountSettings>(
+      `/accounts/${enc(accountId)}/settings`,
+      'PATCH',
+      settings,
+    )
+  },
+
+  /** 清理派生媒体缓存；olderThanSeconds 为 null 表示全部清理。只删加速缓存，不动聊天记录。 */
+  purgeMediaCache(accountId: string, olderThanSeconds: number | null): Promise<PurgedMediaCache> {
+    return jsonRequest<PurgedMediaCache>(
+      `/accounts/${enc(accountId)}/media-cache/purge`,
+      'POST',
+      { olderThanSeconds },
+    )
   },
 
   async uploadFile(accountId: string, file: File): Promise<OwnedMediaSource> {

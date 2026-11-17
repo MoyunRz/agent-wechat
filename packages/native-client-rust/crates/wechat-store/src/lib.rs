@@ -30,7 +30,7 @@ pub use pagination::*;
 pub use recalls::*;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-pub use settings::AccountSettings;
+pub use settings::{AccountSettings, ProactiveCacheKinds};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -146,7 +146,7 @@ pub struct Account {
 }
 
 /// The `registry.sqlite` schema version after every migration.
-const REGISTRY_SCHEMA_VERSION: i64 = 4;
+const REGISTRY_SCHEMA_VERSION: i64 = 5;
 
 pub struct Store {
     pub root: PathBuf,
@@ -234,6 +234,11 @@ impl Store {
         if version < 4 {
             db.execute_batch(include_str!(
                 "../migrations/registry/V004__media_download_settings.sql"
+            ))?;
+        }
+        if version < 5 {
+            db.execute_batch(include_str!(
+                "../migrations/registry/V005__proactive_cache_settings.sql"
             ))?;
         }
         let server_id = db.query_row(
