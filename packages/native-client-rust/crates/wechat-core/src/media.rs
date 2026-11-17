@@ -3696,12 +3696,7 @@ impl Core {
                             match asset.variant {
                                 MediaVariant::Original => (
                                     Some(variants.0.clone().into()),
-                                    uploaded
-                                        .original
-                                        .as_ref()
-                                        .context("uploaded_image_original_missing")?
-                                        .sha256
-                                        .clone(),
+                                    uploaded.original.sha256.clone(),
                                     "image/jpeg",
                                 ),
                                 MediaVariant::Standard => (
