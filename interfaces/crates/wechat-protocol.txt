@@ -26,7 +26,7 @@ const wechat_protocol::silk::MAX_SAMPLES | usize | MISSING DOC
 const wechat_protocol::silk::MAX_STREAM_BYTES | usize | Largest stream accepted by framing validation and decoding.
 const wechat_protocol::silk::SAMPLE_RATE | u32 | MISSING DOC
 const wechat_protocol::verify_user::ACCEPT_OPCODE | u32 | Opcode accepting the contact request carried in field9.
-const wechat_protocol::verify_user::DECLINE_OPCODE | u32 | Opcode declining the contact request carried in field9. Candidate from the protocol spec {2=request, 3=accept, 4=decline}; the signed service reply validates it during rollout.
+const wechat_protocol::verify_user::DECLINE_OPCODE | u32 | Opcode declining the contact request carried in field9. The signed service reply validates the chosen opcode during rollout.
 enum wechat_protocol::AccountInterrupted | #[non_exhaustive] enum | Why the account owner ended a request or a notification wait. This says nothing about whether bytes were sent; check [`NativeRequestNotSubmitted`](crate::NativeRequestNotSubmitted) for that.
 enum wechat_protocol::AccountLifecycle | enum | MISSING DOC
 enum wechat_protocol::GroupMutation | enum | MISSING DOC
