@@ -6,6 +6,26 @@ use wechat_protocol::{
     protobuf as p, ContactLookup, ContactRecord, GroupMetadataPage, InitContactPage, MetadataReply,
     RoomRoster,
 };
+// Metadata refresh pacing: identical refreshes add nothing until time has
+// passed, full catalog rounds are bounded per day, and one failed round backs
+// off exponentially instead of re-storming the service.
+const METADATA_BACKOFF_BASE_SECS: u64 = 30;
+const METADATA_BACKOFF_MAX_SECS: u64 = 600;
+const METADATA_AVATAR_FRESH_SECS: u32 = 6 * 3600;
+
+/// Minimum seconds between identical metadata refreshes, plus the daily full
+/// catalog round cap where one applies.
+fn metadata_throttle_scope(action: &MetadataAction) -> (String, u64, Option<u32>) {
+    match action {
+        MetadataAction::Contact { contact_id } => (format!("contact:{contact_id}"), 60, None),
+        MetadataAction::Group { group_id } => (format!("group:{group_id}"), 60, None),
+        MetadataAction::Members { group_id, .. } => (format!("members:{group_id}"), 30, None),
+        MetadataAction::Avatar { contact_id, .. } => (format!("avatar:{contact_id}"), 300, None),
+        MetadataAction::ContactSync { .. } => ("contactsync".to_owned(), 600, Some(3)),
+        MetadataAction::GroupSync { .. } => ("groupsync".to_owned(), 600, Some(3)),
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(
     tag = "kind",
@@ -890,6 +910,141 @@ impl Core {
         operation: &str,
         action: MetadataAction,
     ) -> Result<Value> {
+        let (scope, min_interval, daily_round_cap) = metadata_throttle_scope(&action);
+        self.metadata_throttle_check(account, &scope, min_interval, daily_round_cap)?;
+        let outcome = self.metadata_dispatch(account, operation, action);
+        match &outcome {
+            Ok(_) => self.record_metadata_success(account, &scope)?,
+            Err(_) => {
+                let _ = self.record_metadata_failure(account, &scope);
+            }
+        }
+        outcome
+    }
+
+    fn metadata_throttle_check(
+        &self,
+        account: &str,
+        scope: &str,
+        min_interval: u64,
+        daily_round_cap: Option<u32>,
+    ) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        if let Some(bytes) = self
+            .store
+            .runtime(account, &format!("metadata-backoff:{scope}"))?
+        {
+            let until = std::str::from_utf8(&bytes)?
+                .trim()
+                .split(' ')
+                .next()
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or_default();
+            ensure!(now >= until, "metadata_backoff");
+        }
+        if let Some(bytes) = self
+            .store
+            .runtime(account, &format!("metadata-last:{scope}"))?
+        {
+            let last = std::str::from_utf8(&bytes)?
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            ensure!(
+                now.saturating_sub(last) >= u32::try_from(min_interval).unwrap_or(u32::MAX),
+                "metadata_rate_limited"
+            );
+        }
+        if let Some(cap) = daily_round_cap {
+            let day = now / 86_400;
+            let key = format!("metadata-rounds:{scope}");
+            let (round_day, count) = self
+                .store
+                .runtime(account, &key)?
+                .and_then(|bytes| {
+                    std::str::from_utf8(&bytes).ok().and_then(|text| {
+                        let mut parts = text.trim().split(' ');
+                        Some((
+                            parts.next()?.parse::<u32>().ok()?,
+                            parts.next()?.parse::<u32>().ok()?,
+                        ))
+                    })
+                })
+                .unwrap_or((0, 0));
+            let count = if round_day == day { count } else { 0 };
+            ensure!(count < cap, "metadata_sync_round_cap");
+            self.store
+                .put_runtime(account, &key, format!("{day} {}", count + 1).as_bytes())?;
+        }
+        Ok(())
+    }
+
+    fn record_metadata_success(&self, account: &str, scope: &str) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        self.store.put_runtime(
+            account,
+            &format!("metadata-last:{scope}"),
+            now.to_string().as_bytes(),
+        )?;
+        self.store
+            .clear_runtime(account, &format!("metadata-backoff:{scope}"))
+    }
+
+    fn record_metadata_failure(&self, account: &str, scope: &str) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        let key = format!("metadata-backoff:{scope}");
+        let attempts = self
+            .store
+            .runtime(account, &key)?
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes).ok().and_then(|text| {
+                    text.trim()
+                        .split(' ')
+                        .nth(1)
+                        .and_then(|value| value.parse::<u32>().ok())
+                })
+            })
+            .unwrap_or_default();
+        let delay = METADATA_BACKOFF_BASE_SECS
+            .saturating_mul(1u64 << attempts.min(10))
+            .min(METADATA_BACKOFF_MAX_SECS) as u32;
+        self.store.put_runtime(
+            account,
+            &key,
+            format!("{} {}", now.saturating_add(delay), attempts + 1).as_bytes(),
+        )
+    }
+
+    /// Avatars rarely change; serve the locally cached copy while it is fresh.
+    fn avatar_cache_fresh(&self, account: &str, contact_id: &str) -> Result<bool> {
+        let Some(bytes) = self
+            .store
+            .runtime(account, &format!("metadata-avatar-at:{contact_id}"))?
+        else {
+            return Ok(false);
+        };
+        let at = std::str::from_utf8(&bytes)?
+            .trim()
+            .parse::<u32>()
+            .unwrap_or_default();
+        Ok(wechat_protocol::wire::unix_time()?.saturating_sub(at) < METADATA_AVATAR_FRESH_SECS)
+    }
+
+    fn record_avatar_cache(&self, account: &str, contact_id: &str) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        self.store.put_runtime(
+            account,
+            &format!("metadata-avatar-at:{contact_id}"),
+            now.to_string().as_bytes(),
+        )
+    }
+
+    fn metadata_dispatch(
+        &self,
+        account: &str,
+        operation: &str,
+        action: MetadataAction,
+    ) -> Result<Value> {
         let deadline = Instant::now() + Duration::from_secs(120);
         self.metadata_check(account, operation, deadline)?;
         self.recover_metadata(account)?;
@@ -948,6 +1103,15 @@ impl Core {
                 contact_id,
                 room_id,
             } => {
+                // Avatars rarely change; serve the locally cached copy while
+                // it is fresh instead of re-fetching the CDN on every call.
+                if self.avatar_cache_fresh(account, &contact_id)? {
+                    return Ok(json!({
+                        "recordCount":0,
+                        "profileProjection":"cached",
+                        "representation":"cache_fresh",
+                    }));
+                }
                 let source = if contact_id.ends_with("@openim") {
                     self.metadata_openim_avatar_source(account, &contact_id, room_id.as_deref())?
                 } else {
@@ -975,6 +1139,7 @@ impl Core {
                 let mut state = self.account_state(account)?;
                 let bytes = self.upstream.download_avatar(&mut state, &source)?;
                 self.save_state(account, &state)?;
+                self.record_avatar_cache(account, &contact_id)?;
                 let id = self.stage_metadata_body(
                     account,
                     ReceiptBody::Avatar {
@@ -2169,5 +2334,62 @@ mod tests {
             patch.fields["is_in_chat_room"],
             SqlValue::Integer("2".into())
         );
+    }
+
+    fn throttle_core() -> (Arc<Core>, tempfile::TempDir) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        store.create_account("one").unwrap();
+        (Core::new(store, None).unwrap(), temp)
+    }
+
+    #[test]
+    fn metadata_throttle_paces_identical_refreshes_and_backs_off_after_failures() {
+        let (core, _temp) = throttle_core();
+        let scope = "contact:wxid_a".to_owned();
+        core.metadata_throttle_check("one", &scope, 60, None)
+            .unwrap();
+        // A completed refresh paces the next one for the same contact.
+        core.record_metadata_success("one", &scope).unwrap();
+        assert!(core
+            .metadata_throttle_check("one", &scope, 60, None)
+            .is_err());
+        // A different scope is unaffected.
+        core.metadata_throttle_check("one", "contact:wxid_b", 60, None)
+            .unwrap();
+        // One failure opens an exponential backoff window for the scope.
+        core.record_metadata_failure("one", &scope).unwrap();
+        let error = core
+            .metadata_throttle_check("one", &scope, 60, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("metadata_backoff"));
+        // Success records the pacing stamp and clears the backoff window.
+        core.record_metadata_success("one", &scope).unwrap();
+        let error = core
+            .metadata_throttle_check("one", &scope, 60, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("metadata_rate_limited"));
+    }
+
+    #[test]
+    fn metadata_catalog_rounds_are_capped_per_day() {
+        let (core, _temp) = throttle_core();
+        let scope = "contactsync".to_owned();
+        for _ in 0..3 {
+            core.metadata_throttle_check("one", &scope, 600, Some(3))
+                .unwrap();
+        }
+        let error = core
+            .metadata_throttle_check("one", &scope, 600, Some(3))
+            .unwrap_err();
+        assert!(error.to_string().contains("metadata_sync_round_cap"));
+    }
+
+    #[test]
+    fn avatar_cache_freshness_skips_repeat_fetches() {
+        let (core, _temp) = throttle_core();
+        assert!(!core.avatar_cache_fresh("one", "wxid_x").unwrap());
+        core.record_avatar_cache("one", "wxid_x").unwrap();
+        assert!(core.avatar_cache_fresh("one", "wxid_x").unwrap());
     }
 }

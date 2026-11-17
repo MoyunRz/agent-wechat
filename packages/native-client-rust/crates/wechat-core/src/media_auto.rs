@@ -28,15 +28,14 @@ pub(super) fn allowed(
     if asset.kind == MediaKind::Voice {
         return kinds.allows("voice") && asset.variant == MediaVariant::Normal;
     }
+    // Auto-download takes the compressed copy only. The Original variant of
+    // the same picture or video would issue a second CDN request in parallel
+    // for bytes nobody asked for; it stays available on explicit request.
     matches!(
         (asset.kind, asset.variant),
-        (
-            MediaKind::Image,
-            MediaVariant::Standard | MediaVariant::Original
-        ) | (
-            MediaKind::Video,
-            MediaVariant::Normal | MediaVariant::Original
-        ) | (MediaKind::File, MediaVariant::Original)
+        (MediaKind::Image, MediaVariant::Standard)
+            | (MediaKind::Video, MediaVariant::Normal)
+            | (MediaKind::File, MediaVariant::Original)
             | (MediaKind::Sticker, MediaVariant::Original)
     ) && kinds.allows(kind_name(asset.kind))
         && limit > 0

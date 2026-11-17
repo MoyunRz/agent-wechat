@@ -142,6 +142,7 @@ fn persisted_message_projection_matches_the_consumer_contract() {
     std::fs::write(&mmkv, pair.data()).unwrap();
     std::fs::write(mmkv.with_extension("crc"), pair.metadata()).unwrap();
     let core = Core::new(store, None).unwrap();
+    core.set_send_pacing_secs(0);
     core.bind_profile_identity("a", &mmkv, &format_key).unwrap();
 
     let mut projected = Map::new();

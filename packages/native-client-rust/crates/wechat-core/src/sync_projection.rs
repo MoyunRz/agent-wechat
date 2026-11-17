@@ -2756,8 +2756,10 @@ mod automatic_voice_tests {
             (302, 49, "<msg><appmsg><title>small.txt</title><type>6</type><appattach><totallen>80</totallen><cdnattachurl>synthetic-file</cdnattachurl><aeskey>09090909090909090909090909090909</aeskey></appattach></appmsg></msg>", vec!["original"]),
             (303, 3, "<msg><img aeskey='09090909090909090909090909090909' cdnmidimgurl='unknown-standard' cdnbigimgurl='unknown-original' cdnthumburl='unknown-thumb' cdnthumbaeskey='09090909090909090909090909090909'/></msg>", vec!["thumbnail"]),
             (304, 49, "<msg><appmsg><title>unknown.txt</title><type>6</type><appattach><cdnattachurl>unknown-file</cdnattachurl><aeskey>09090909090909090909090909090909</aeskey></appattach></appmsg></msg>", vec![]),
-            (305, 3, "<msg><img aeskey='09090909090909090909090909090909' cdnbigimgurl='small-original' hdlength='100'/></msg>", vec!["original"]),
-            (306, 43, "<msg><videomsg cdnrawvideourl='small-original-video' cdnrawvideoaeskey='09090909090909090909090909090909' rawlength='100'/></msg>", vec!["original"]),
+            // Original-only media is no longer fetched automatically; the
+            // compressed copy (or explicit request) covers it.
+            (305, 3, "<msg><img aeskey='09090909090909090909090909090909' cdnbigimgurl='small-original' hdlength='100'/></msg>", vec![]),
+            (306, 43, "<msg><videomsg cdnrawvideourl='small-original-video' cdnrawvideoaeskey='09090909090909090909090909090909' rawlength='100'/></msg>", vec![]),
         ] {
             core.apply_received_sync_command("one", &add(kind, "peer", "synthetic_self", content.as_bytes(), server, 100), &format!("media-{server}"), "live").unwrap();
             let mut qualities = store.runtime_prefix("one", "received-media:", 100).unwrap().iter().filter_map(|(_, bytes)| {

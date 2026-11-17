@@ -49,7 +49,7 @@ mod status_control;
 mod system_control;
 #[path = "verify_user.rs"]
 mod verify_user;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -155,6 +155,10 @@ pub struct CoreShared {
     /// Derived cache of decoded media bytes; entries are regenerable, so
     /// removing the directory never loses account data.
     pub(crate) media_cache: crate::media_cache::MediaDiskCache,
+    /// Pacing override so semantic tests can submit several sends to one
+    /// chat without simulating real-time spacing.
+    #[cfg(test)]
+    pub(crate) send_pacing_secs: std::sync::atomic::AtomicU32,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,
@@ -375,6 +379,10 @@ impl Core {
                 profile_snapshot_opens: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 projection_command_attempts: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                send_pacing_secs: std::sync::atomic::AtomicU32::new(
+                    Self::SEND_CONTACT_INTERVAL_SECS,
+                ),
                 profile_format_key: Mutex::new(Some(crate::format::global_mmkv_format_key())),
                 bootstrap_leases: Mutex::new(bootstrap_leases),
                 startup_profiles_recovered: AtomicBool::new(false),
@@ -1408,6 +1416,71 @@ impl Core {
         )
         .await
     }
+    // Outgoing traffic pacing: a person does not fire at one chat twice
+    // within half a minute, and one unknown outcome stops every send.
+    const SEND_CONTACT_INTERVAL_SECS: u32 = 30;
+    const SEND_BREAKER_SECS: u32 = 3600;
+    const SEND_BREAKER_KEY: &str = "send-breaker";
+
+    /// True while an unknown send outcome keeps the account's send circuit open.
+    pub(crate) fn send_circuit_open(&self, account: &str) -> Result<bool> {
+        let Some(bytes) = self.store.runtime(account, Self::SEND_BREAKER_KEY)? else {
+            return Ok(false);
+        };
+        let until: u32 = std::str::from_utf8(&bytes)?
+            .trim()
+            .parse()
+            .unwrap_or_default();
+        Ok(wechat_protocol::wire::unix_time()? < until)
+    }
+
+    /// Open the send circuit for one hour after an unknown send outcome.
+    pub(crate) fn trip_send_breaker(&self, account: &str) -> Result<()> {
+        let until = wechat_protocol::wire::unix_time()? + Self::SEND_BREAKER_SECS;
+        self.store.put_runtime(
+            account,
+            Self::SEND_BREAKER_KEY,
+            until.to_string().as_bytes(),
+        )?;
+        self.store
+            .append_event(account, "send.circuit_tripped", &json!({"until": until}))?;
+        Ok(())
+    }
+
+    pub(crate) fn check_contact_send_interval(&self, account: &str, thread: &str) -> Result<()> {
+        #[cfg(test)]
+        let interval = self.send_pacing_secs.load(Ordering::Relaxed);
+        #[cfg(not(test))]
+        let interval = Self::SEND_CONTACT_INTERVAL_SECS;
+        let key = format!("send-last:{thread}");
+        if let Some(bytes) = self.store.runtime(account, &key)? {
+            let last: u32 = std::str::from_utf8(&bytes)?
+                .trim()
+                .parse()
+                .unwrap_or_default();
+            ensure!(
+                wechat_protocol::wire::unix_time()?.saturating_sub(last) >= interval,
+                "send_contact_rate_limited"
+            );
+        }
+        Ok(())
+    }
+
+    /// Disable or shorten contact pacing for one test process.
+    #[cfg(test)]
+    pub(crate) fn set_send_pacing_secs(&self, secs: u32) {
+        self.send_pacing_secs.store(secs, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_contact_send(&self, account: &str, thread: &str) -> Result<()> {
+        let now = wechat_protocol::wire::unix_time()?;
+        self.store.put_runtime(
+            account,
+            &format!("send-last:{thread}"),
+            now.to_string().as_bytes(),
+        )
+    }
+
     async fn queue_message_send(
         self: &Arc<Self>,
         account: &str,
@@ -1465,6 +1538,11 @@ impl Core {
         {
             bail!("invalid send request");
         }
+        // Only new submissions are gated; replaying a stored key returns the
+        // recorded intent instead of another submission.
+        if self.store.send_by_key(account, key).is_err() {
+            ensure!(!self.send_circuit_open(account)?, "send_circuit_open");
+        }
         let client_id =
             wechat_protocol::wire::client_message_id(format!("{account}:{key}").as_bytes()).max(1);
         let resolved_mentions = mentions
@@ -1519,6 +1597,11 @@ impl Core {
         let encrypted = self
             .vault
             .seal(account, "send-payload", &serde_json::to_vec(&payload)?)?;
+        // Contact pacing applies to the actual submission; payload resolution
+        // above already rejected malformed requests with their real errors.
+        if self.store.send_by_key(account, key).is_err() {
+            self.check_contact_send_interval(account, destination)?;
+        }
         let (intent, created) = self.store.create_send(
             account,
             key,
@@ -1528,6 +1611,7 @@ impl Core {
             &client_id.to_string(),
         )?;
         if created {
+            self.record_contact_send(account, destination)?;
             let core = self.clone();
             let account = account.to_string();
             let id = intent.id.clone();
@@ -1546,6 +1630,9 @@ impl Core {
                             None,
                             Some("worker_interrupted"),
                         );
+                        if state == "needs_review" {
+                            let _ = core.trip_send_breaker(&account);
+                        }
                     }
                 }
             });
@@ -1571,6 +1658,19 @@ impl Core {
                 return Ok(());
             }
             if intent.state != "queued" {
+                return Ok(());
+            }
+            if core.send_circuit_open(&account)? {
+                // A known pre-submission refusal: no network call follows.
+                if core.store.claim_send(&account, &id)? {
+                    core.store.update_send(
+                        &account,
+                        &id,
+                        "failed",
+                        None,
+                        Some("send_circuit_open"),
+                    )?;
+                }
                 return Ok(());
             }
             let encrypted = core.store.send_payload(&account, &id)?;
@@ -1792,13 +1892,17 @@ impl Core {
                     None,
                     Some("send_admission_revoked"),
                 )?,
-                _ => core.store.update_send(
-                    &account,
-                    &id,
-                    "needs_review",
-                    None,
-                    Some("submission_outcome_unknown"),
-                )?,
+                _ => {
+                    let updated = core.store.update_send(
+                        &account,
+                        &id,
+                        "needs_review",
+                        None,
+                        Some("submission_outcome_unknown"),
+                    )?;
+                    let _ = core.trip_send_breaker(&account);
+                    updated
+                }
             };
             if updated.state == "accepted" {
                 let _ = core.project_message_send(&account, &id);
@@ -3435,6 +3539,7 @@ mod tests {
         Arc::get_mut(&mut Arc::get_mut(&mut core).unwrap().shared)
             .unwrap()
             .upstream = Arc::new(NoSend);
+        core.set_send_pacing_secs(0);
         super::groups::tests::make_group(&core);
         core.stopping.store(true, Ordering::SeqCst);
         core.store
@@ -3633,6 +3738,7 @@ mod tests {
             .unwrap()
             .upstream = Arc::new(Capture(captured.clone()));
         super::groups::tests::make_group(&core);
+        core.set_send_pacing_secs(0);
         core.stopping.store(true, Ordering::SeqCst);
         core.store
             .put_runtime("one", "desired", b"connected")
@@ -3761,6 +3867,7 @@ mod tests {
         store.create_account("one").unwrap();
         let core = Core::new(store.clone(), None).unwrap();
         core.configure_profile_format_key(&[9; 16]).unwrap();
+        core.set_send_pacing_secs(0);
         let mut accepted = state();
         accepted.database_password = vec![7; 32];
         accepted.key_info = vec![8; 32];
@@ -4072,6 +4179,7 @@ mod tests {
         .unwrap();
         drop(core);
         let restarted = Core::new(store.clone(), None).unwrap();
+        restarted.set_send_pacing_secs(0);
         restarted.configure_profile_format_key(&[9; 16]).unwrap();
         restarted.stopping.store(true, Ordering::SeqCst);
         assert_eq!(
@@ -4208,6 +4316,7 @@ mod tests {
         store.create_account("one").unwrap();
         let core = Core::new(store.clone(), None).unwrap();
         core.configure_profile_format_key(&[9; 16]).unwrap();
+        core.set_send_pacing_secs(0);
         let mut accepted = state();
         accepted.database_password = vec![7; 32];
         accepted.key_info = vec![8; 32];
@@ -4531,5 +4640,38 @@ mod tests {
         let core = Core::new(store, None).unwrap();
         assert!(core.profile_reader("fresh").is_ok());
         assert_eq!(core.account_state("fresh").unwrap().uin, 1);
+    }
+
+    #[test]
+    fn unknown_send_outcome_opens_the_send_circuit() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        store.create_account("one").unwrap();
+        let core = Core::new(store, None).unwrap();
+        assert!(!core.send_circuit_open("one").unwrap());
+        core.trip_send_breaker("one").unwrap();
+        assert!(core.send_circuit_open("one").unwrap());
+        // Past the open window sends resume.
+        core.store.put_runtime("one", "send-breaker", b"0").unwrap();
+        assert!(!core.send_circuit_open("one").unwrap());
+    }
+
+    #[test]
+    fn sends_to_one_chat_are_paced_by_contact() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        store.create_account("one").unwrap();
+        let core = Core::new(store, None).unwrap();
+        core.check_contact_send_interval("one", "peer").unwrap();
+        core.record_contact_send("one", "peer").unwrap();
+        // A second immediate send to the same chat is paced; other chats are not.
+        assert!(core.check_contact_send_interval("one", "peer").is_err());
+        core.check_contact_send_interval("one", "other_peer")
+            .unwrap();
+        // An older stamp past the interval passes again.
+        core.store
+            .put_runtime("one", "send-last:peer", b"1000")
+            .unwrap();
+        core.check_contact_send_interval("one", "peer").unwrap();
     }
 }

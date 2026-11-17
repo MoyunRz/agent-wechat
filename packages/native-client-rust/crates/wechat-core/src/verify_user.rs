@@ -12,7 +12,14 @@ use wechat_protocol::VerifyUserAcceptRequest;
 const GATE_KEY: &str = "verify-user-gate";
 const LAST_KEY: &str = "verify-user-last";
 const DAILY_LIMIT: u32 = 20;
-const MIN_INTERVAL_SECS: u64 = 10;
+// Minute-level pacing: a batch of acceptances must look like a person
+// clicking through requests, not a script draining the queue.
+const MIN_INTERVAL_SECS: u64 = 60;
+const BREAKER_KEY: &str = "verify-user-breaker";
+// After one submission fails (empty or malformed reply envelope), the signed
+// outcome is unknown and continuing the batch is how risk control escalates;
+// open the circuit for the whole account for an hour.
+const BREAKER_SECS: u64 = 3600;
 
 /// One contact-request action multiplexed over the verifyuser endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,8 +126,28 @@ impl Core {
             .unwrap_or_default())
     }
 
+    fn trip_contact_request_breaker(&self, account: &str) -> Result<()> {
+        let until = epoch_secs() + BREAKER_SECS;
+        self.store
+            .put_runtime(account, BREAKER_KEY, until.to_string().as_bytes())?;
+        self.store.append_event(
+            account,
+            "contact.accept_circuit_tripped",
+            &json!({"until": until}),
+        )?;
+        Ok(())
+    }
+
     fn rate_limit_check(&self, account: &str) -> Result<()> {
         let now = epoch_secs();
+        let open_until = self.store.runtime(account, BREAKER_KEY)?.and_then(|value| {
+            std::str::from_utf8(&value)
+                .ok()
+                .and_then(|text| text.trim().parse::<u64>().ok())
+        });
+        if let Some(until) = open_until {
+            ensure!(now >= until, "contact_accept_circuit_open");
+        }
         if let Some(last) = self.store.runtime(account, LAST_KEY)? {
             let last = std::str::from_utf8(&last)?
                 .parse::<u64>()
@@ -291,7 +318,10 @@ impl Core {
                 }
                 Err(error) => {
                     // The signed outcome is unknown after a failed submission;
-                    // keep the short root-cause text for diagnosis.
+                    // an empty or malformed reply envelope is the escalation
+                    // signal, so the whole batch stops for one hour.
+                    let _ = core.trip_contact_request_breaker(&account);
+                    // Keep the short root-cause text for diagnosis.
                     let text = error.to_string();
                     let mut end = text.len().min(500);
                     while end > 0 && !text.is_char_boundary(end) {
@@ -364,6 +394,18 @@ mod tests {
         core.rate_limit_check("one").unwrap();
         core.record_submission("one").unwrap();
         assert!(core.rate_limit_check("one").is_err());
+    }
+
+    #[test]
+    fn failed_submission_opens_the_circuit_for_the_whole_batch() {
+        let (core, _temp) = core();
+        core.rate_limit_check("one").unwrap();
+        core.trip_contact_request_breaker("one").unwrap();
+        // Every later submission on the account is blocked while open.
+        assert!(core.rate_limit_check("one").is_err());
+        // Past the open window the limiter resumes normally.
+        core.store.put_runtime("one", BREAKER_KEY, b"0").unwrap();
+        core.rate_limit_check("one").unwrap();
     }
 
     #[test]

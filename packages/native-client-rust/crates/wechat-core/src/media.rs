@@ -1087,6 +1087,8 @@ impl Core {
             "unsupported_thumbnail_variant"
         );
         validate_destination(&request.thread_id)?;
+        ensure!(!self.send_circuit_open(account)?, "send_circuit_open");
+        self.check_contact_send_interval(account, &request.thread_id)?;
         ensure!(
             request.kind != MediaKind::Sticker,
             "sticker_send_unsupported"
@@ -1146,6 +1148,7 @@ impl Core {
             &payload,
         )?;
         if new {
+            self.record_contact_send(account, &request.thread_id)?;
             self.spawn_media_worker(account, &row.id);
         }
         Ok(public_job(account, &row))
@@ -2743,6 +2746,8 @@ impl Core {
                         plan.voice[index].status = "needs_review".into();
                         self.save_send_plan(account, id, &plan)?;
                         let _ = self.save_state(account, &state);
+                        // The voice submission outcome is unknown.
+                        let _ = self.trip_send_breaker(account);
                         return Err(error);
                     }
                 };
@@ -3143,6 +3148,8 @@ impl Core {
             }
             Err(error) => {
                 let _ = self.save_state(account, &state);
+                // The submission was crossed, so its outcome is unknown.
+                let _ = self.trip_send_breaker(account);
                 Err(error)
             }
         }
@@ -3160,6 +3167,9 @@ impl Core {
             wechat_protocol::media_send::SendStatus::NeedsReview => "needs_review",
         }
         .into();
+        if row.state == "needs_review" {
+            let _ = self.trip_send_breaker(account);
+        }
         row.phase = "completed".into();
         row.retryable = false;
         row.data["serverMessageId"] = receipt.server_message_id.clone().into();
