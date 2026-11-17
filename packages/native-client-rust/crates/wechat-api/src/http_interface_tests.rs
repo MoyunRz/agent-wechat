@@ -87,6 +87,7 @@ payloads! {
     "NativeContactAcceptRequest" => crate::contracts::NativeContactAcceptRequest,
     "NativeContactGateRequest" => crate::contracts::NativeContactGateRequest,
     "NativeOfflineModeRequest" => crate::contracts::NativeOfflineModeRequest,
+    "NativeOpenClawConfigRequest" => crate::contracts::NativeOpenClawConfigRequest,
     "NativeForgetRequest" => crate::contracts::NativeForgetRequest,
     "NativeTextSendRequest" => crate::contracts::NativeTextSendRequest,
     "NativeSendIntent" => crate::contracts::NativeSendIntent,

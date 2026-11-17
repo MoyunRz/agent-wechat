@@ -82,6 +82,10 @@ function openContacts(): void {
   emit('update:view', 'contacts')
 }
 
+function openOpenclaw(): void {
+  emit('update:view', 'openclaw')
+}
+
 function toggleAccountMenu(): void {
   settingsOpen.value = false
   accountMenuOpen.value = !accountMenuOpen.value
@@ -286,6 +290,15 @@ async function purgeCache(seconds: number | null): Promise<void> {
           v-if="(friendRequestCount ?? 0) > 0 && view !== 'contacts'"
           class="rail-badge"
         >{{ badgeText(friendRequestCount ?? 0) }}</span>
+      </button>
+      <button
+        type="button"
+        class="rail-button"
+        :class="{ active: view === 'openclaw' }"
+        title="OpenClaw 配置"
+        @click="openOpenclaw"
+      >
+        <Icon name="panel" :size="20" />
       </button>
     </div>
 

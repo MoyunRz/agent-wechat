@@ -186,6 +186,14 @@ export class NativeWeChatClient {
     if (typeof enabled !== "boolean") throw new Error("The gate state must be a boolean");
     return this.request(`v1/accounts/${id(accountId)}/contacts/verify-user/gate`, { method: "POST", body: JSON.stringify({ enabled }) });
   }
+  /** Show one account's stored OpenClaw configuration document, or null when the account falls back to the OpenClaw host config. */
+  openclawConfig(accountId: string): Promise<{ config: unknown, updatedAt: number | null }> {
+    return this.request(`v1/accounts/${id(accountId)}/openclaw-config`);
+  }
+  /** Store or clear one account's OpenClaw configuration document. Each WeChat account keeps its own copy, so different users configure different OpenClaw policies. */
+  setOpenClawConfig(accountId: string, config: unknown): Promise<{ config: unknown, updatedAt: number }> {
+    return this.request(`v1/accounts/${id(accountId)}/openclaw-config`, { method: "PUT", body: JSON.stringify({ config }) });
+  }
   groups(accountId: string, options?: string | NativeListOptions): Promise<NativePage<NativeGroup>> { return this.request(`v1/accounts/${id(accountId)}/groups${listQuery(options)}`); }
   thread(accountId: string, threadId: string, signal?: AbortSignal): Promise<NativeThread> { return this.request(`v1/accounts/${id(accountId)}/threads/${id(threadId)}`, { signal }); }
   contact(accountId: string, username: string): Promise<NativeContact> { return this.request(`v1/accounts/${id(accountId)}/contacts/${id(username)}`); }

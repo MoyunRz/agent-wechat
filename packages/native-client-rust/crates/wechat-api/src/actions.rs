@@ -42,6 +42,10 @@ pub(super) fn routes() -> Router<App> {
             post(contact_gate),
         )
         .api_route("/v1/accounts/{a}/offline", post(offline_mode))
+        .api_route(
+            "/v1/accounts/{a}/openclaw-config",
+            get(openclaw_config).put(set_openclaw_config),
+        )
         .api_route("/v1/accounts/{a}/friend-requests", get(friend_requests))
         .api_route(
             "/v1/accounts/{a}/friend-requests/{id}/preflight",
@@ -174,6 +178,36 @@ async fn offline_mode(
         "enabled": input.enabled,
         "connection": if input.enabled { "disconnected" } else { "unchanged" },
     })))
+}
+async fn openclaw_config(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "read")?;
+    match app.core.store.openclaw_config(&a)? {
+        Some((config, updated_at)) => Ok(Json(json!({"config":config,"updatedAt":updated_at}))),
+        None => Ok(Json(json!({"config":null,"updatedAt":null}))),
+    }
+}
+async fn set_openclaw_config(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<contracts::NativeOpenClawConfigRequest>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "admin")?;
+    let _guard = app.core.lock_account(&a).await?;
+    let updated_at = app
+        .core
+        .store
+        .set_openclaw_config(&a, input.config.as_ref())?;
+    app.core.store.append_event(
+        &a,
+        "account.openclaw_config_updated",
+        &json!({"accountId":a,"cleared":input.config.is_none(),"updatedAt":updated_at}),
+    )?;
+    Ok(Json(json!({"config":input.config,"updatedAt":updated_at})))
 }
 async fn accept_friend_request(
     State(app): State<App>,

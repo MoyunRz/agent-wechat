@@ -297,8 +297,25 @@ export async function startNativeMonitor(opts: WeChatMonitorOptions): Promise<vo
     const cfg = core.config.current();
     const account = resolveWeChatAccount(cfg as Record<string, unknown>, opts.account.accountId) ?? opts.account;
     if (account.backend !== "native" || JSON.stringify(account.native) !== JSON.stringify(native)) throw new Error("Native service configuration changed; restart required before processing");
+    // Each WeChat account reads its own stored OpenClaw policy document from
+    // the daemon registry; an account without one keeps the host config. Only
+    // policy keys are overridden, never the connection configuration.
+    let effective = account;
+    try {
+      const stored = await host.client.openclawConfig(native.accountId);
+      const config = stored?.config as Record<string, unknown> | null | undefined;
+      if (config && typeof config === "object" && !Array.isArray(config)) {
+        const policyKeys = ["dmPolicy", "allowFrom", "groupPolicy", "groupAllowFrom", "groups", "mediaMaxMb", "enabled"] as const;
+        const patch: Record<string, unknown> = {};
+        for (const key of policyKeys) if (config[key] !== undefined) patch[key] = config[key];
+        effective = { ...account, ...patch } as ResolvedWeChatAccount;
+      }
+    } catch (error) {
+      opts.log?.error?.("Native OpenClaw config read failed; the account keeps its host configuration");
+      void error;
+    }
     for (const item of state.items().filter(value => value.state === "received")) {
-      await dispatchNativeMessage({ client: host.client, state, account, message: item.message, cfg, core,
+      await dispatchNativeMessage({ client: host.client, state, account: effective, message: item.message, cfg, core,
         signal: opts.abortSignal, onDelivered: () => opts.setStatus({ accountId: account.accountId, lastOutboundAt: Date.now() }) });
     }
     try { await flushRead(); }

@@ -146,7 +146,7 @@ pub struct Account {
 }
 
 /// The `registry.sqlite` schema version after every migration.
-const REGISTRY_SCHEMA_VERSION: i64 = 5;
+const REGISTRY_SCHEMA_VERSION: i64 = 6;
 
 pub struct Store {
     pub root: PathBuf,
@@ -239,6 +239,11 @@ impl Store {
         if version < 5 {
             db.execute_batch(include_str!(
                 "../migrations/registry/V005__proactive_cache_settings.sql"
+            ))?;
+        }
+        if version < 6 {
+            db.execute_batch(include_str!(
+                "../migrations/registry/V006__openclaw_configs.sql"
             ))?;
         }
         let server_id = db.query_row(

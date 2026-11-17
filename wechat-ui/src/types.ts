@@ -1,6 +1,6 @@
 export type ThreadFilter = 'all' | 'unread' | 'direct' | 'groups' | 'mini' | 'official'
 
-export type RailView = 'chats' | 'contacts'
+export type RailView = 'chats' | 'contacts' | 'openclaw'
 
 export type ThemeMode = 'dark' | 'light'
 

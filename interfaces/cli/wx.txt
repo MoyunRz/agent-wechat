@@ -37,6 +37,9 @@ wx accounts list | - | List accounts on the selected server
 wx accounts offline | - | Show or toggle this account's offline mode, which admits no WeChat server request and serves reads from the local cache
 wx accounts offline --off | switch | Turn offline mode off; reconnecting stays manual
 wx accounts offline --on | switch | Turn offline mode on; the live connection is disconnected at once
+wx accounts open-claw-config | - | Show, replace or clear this account's stored OpenClaw configuration document. Each WeChat account keeps its own copy, so different users configure different OpenClaw policies
+wx accounts open-claw-config --clear | switch | Remove the stored document; the account falls back to the OpenClaw host config
+wx accounts open-claw-config --set-file | takes <FILE> | Replace the stored document with the JSON object in this file
 wx accounts remove | - | Remove a signed-out profile from the hub, retaining its local files
 wx accounts remove --confirm | required, takes <CONFIRM> | Repeat the exact account ID to confirm removal
 wx accounts remove <ID> | position 1, required | Account ID from wx accounts list

@@ -260,6 +260,16 @@ export const wechatApi = {
     return jsonRequest(`/accounts/${enc(accountId)}/offline`, 'POST', { enabled })
   },
 
+  /** 读取该微信账号存储的 OpenClaw 配置；null 表示回退到 OpenClaw 宿主配置。 */
+  getOpenClawConfig(accountId: string): Promise<{ config: Record<string, unknown> | null, updatedAt: number | null }> {
+    return request(`/accounts/${enc(accountId)}/openclaw-config`)
+  },
+
+  /** 写入该微信账号的 OpenClaw 配置（null 清除存储副本）。每个微信账号各自隔离一份。 */
+  setOpenClawConfig(accountId: string, config: Record<string, unknown> | null): Promise<{ config: Record<string, unknown> | null, updatedAt: number | null }> {
+    return jsonRequest(`/accounts/${enc(accountId)}/openclaw-config`, 'PUT', { config })
+  },
+
   createLoginAttempt(accountId: string, key = idempotencyKey('login')): Promise<LoginAttempt> {
     return jsonRequest<LoginAttempt>(
       `/accounts/${enc(accountId)}/login-attempts`,

@@ -649,6 +649,17 @@ pub struct NativeOfflineModeRequest {
     /// live connection; disabling does not reconnect by itself.
     pub enabled: bool,
 }
+/// Request to store or clear one account's OpenClaw configuration document.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeOpenClawConfigRequest {
+    /// The account's OpenClaw configuration as a JSON object, or null to remove
+    /// the stored copy and fall back to the OpenClaw host config. Each WeChat
+    /// account keeps its own copy, so different users configure different
+    /// OpenClaw policies.
+    #[ts(type = "any | null")]
+    pub config: Option<Value>,
+}
 /// Request to mark a chat as read.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

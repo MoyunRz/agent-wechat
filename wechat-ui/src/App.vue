@@ -42,6 +42,7 @@ import ContactSearchDialog from './components/ContactSearchDialog.vue'
 import Icon from './components/Icon.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import MessageList from './components/MessageList.vue'
+import OpenClawPanel from './components/OpenClawPanel.vue'
 import ThreadAvatar from './components/ThreadAvatar.vue'
 import ThreadList from './components/ThreadList.vue'
 
@@ -2963,6 +2964,12 @@ onBeforeUnmount(() => {
         @toggle-offline="toggleOfflineMode"
       />
 
+      <OpenClawPanel
+        v-if="railView === 'openclaw'"
+        :account="account"
+      />
+
+      <template v-else>
       <!-- KeepAlive 保活：聊天列表/通讯录切换不再销毁重建，头像与滚动位置得以保留。 -->
       <KeepAlive>
         <ThreadList
@@ -3326,6 +3333,7 @@ onBeforeUnmount(() => {
           @send="sendMessage"
         />
       </main>
+      </template>
 
       <ContactSearchDialog
         :open="contactDialogOpen"

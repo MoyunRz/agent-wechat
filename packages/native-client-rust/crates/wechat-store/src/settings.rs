@@ -184,10 +184,131 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+
+    /// One account's stored OpenClaw configuration document and the unix
+    /// seconds it was last written. `None` means no stored copy: the account
+    /// falls back to whatever the OpenClaw host config provides.
+    pub fn openclaw_config(&self, account: &str) -> Result<Option<(serde_json::Value, i64)>> {
+        self.account(account)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
+        use rusqlite::OptionalExtension;
+        let row: Option<(String, i64)> = db
+            .query_row(
+                "SELECT config,updated_at FROM openclaw_configs WHERE account_id=?1",
+                [account],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(config, updated_at)| {
+            (
+                serde_json::from_str(&config).unwrap_or(serde_json::Value::Null),
+                updated_at,
+            )
+        }))
+    }
+
+    /// Store or clear one account's OpenClaw configuration document. Each
+    /// WeChat account keeps its own copy, so different users configure
+    /// different OpenClaw policies. The document must be a JSON object of at
+    /// most 256 KiB. `None` removes the stored copy.
+    pub fn set_openclaw_config(
+        &self,
+        account: &str,
+        config: Option<&serde_json::Value>,
+    ) -> Result<i64> {
+        if let Some(config) = config {
+            if !config.is_object()
+                || serde_json::to_vec(config).is_ok_and(|bytes| bytes.len() > 256 * 1024)
+            {
+                bail!("invalid_openclaw_config");
+            }
+        }
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or_default();
+        self.account(account)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
+        match config {
+            Some(config) => db.execute(
+                "INSERT INTO openclaw_configs(account_id,config,updated_at) VALUES(?1,?2,?3) ON CONFLICT(account_id) DO UPDATE SET config=excluded.config,updated_at=excluded.updated_at",
+                params![account, config.to_string(), updated_at],
+            )?,
+            None => db.execute(
+                "DELETE FROM openclaw_configs WHERE account_id=?1",
+                params![account],
+            )?,
+        };
+        Ok(updated_at)
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openclaw_configs_are_per_account_persisted_and_clearable() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("data");
+        let store = Store::open(&path).unwrap();
+        store.create_account("a").unwrap();
+        store.create_account("b").unwrap();
+        assert!(store.openclaw_config("a").unwrap().is_none());
+        let config = serde_json::json!({"dmPolicy":"open","allowFrom":["*"]});
+        let first = store.set_openclaw_config("a", Some(&config)).unwrap();
+        let stored = store.openclaw_config("a").unwrap().unwrap();
+        assert_eq!(stored.0, config);
+        assert_eq!(stored.1, first);
+        // Each account keeps its own copy.
+        assert!(store.openclaw_config("b").unwrap().is_none());
+        store
+            .set_openclaw_config("b", Some(&serde_json::json!({"dmPolicy":"disabled"})))
+            .unwrap();
+        assert_eq!(
+            store.openclaw_config("a").unwrap().unwrap().0["dmPolicy"],
+            "open"
+        );
+        // Only JSON objects are stored, and the account must exist.
+        assert!(store
+            .set_openclaw_config("a", Some(&serde_json::json!([1])))
+            .is_err());
+        assert!(store.set_openclaw_config("absent", Some(&config)).is_err());
+        // Clearing removes the stored copy.
+        store.set_openclaw_config("a", None).unwrap();
+        assert!(store.openclaw_config("a").unwrap().is_none());
+        // The stored document survives reopening.
+        store.set_openclaw_config("b", Some(&config)).unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.openclaw_config("b").unwrap().unwrap().0, config);
+    }
+
+    #[test]
+    fn upgrading_registry_creates_the_openclaw_config_table() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("data");
+        let store = Store::open(&path).unwrap();
+        store.create_account("a").unwrap();
+        store
+            .db
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TABLE openclaw_configs; PRAGMA user_version=4;")
+            .unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert!(store.openclaw_config("a").unwrap().is_none());
+        store
+            .set_openclaw_config("a", Some(&serde_json::json!({"dmPolicy":"open"})))
+            .unwrap();
+    }
+
     #[test]
     fn media_settings_are_per_account_and_survive_reopening() {
         let temp = tempfile::tempdir().unwrap();

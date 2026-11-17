@@ -323,6 +323,15 @@ enum AccountCommand {
         #[arg(long)]
         off: bool,
     },
+    /// Show, replace or clear this account's stored OpenClaw configuration document. Each WeChat account keeps its own copy, so different users configure different OpenClaw policies.
+    OpenClawConfig {
+        /// Replace the stored document with the JSON object in this file.
+        #[arg(long, value_name = "FILE")]
+        set_file: Option<String>,
+        /// Remove the stored document; the account falls back to the OpenClaw host config.
+        #[arg(long)]
+        clear: bool,
+    },
     /// Show features available to the selected account.
     Capabilities,
     /// Reconnect the selected account using its saved WeChat session.
@@ -1818,6 +1827,38 @@ async fn run(cli: Cli) -> Result<()> {
                 } else {
                     let status = r.get(r.path("")?.trim_end_matches('/')).await?;
                     json!({"enabled":status["offlineMode"].as_bool().unwrap_or(false)})
+                }
+            }
+            AccountCommand::OpenClawConfig { set_file, clear } => {
+                if set_file.is_some() && clear {
+                    bail!("choose only one of --set-file or --clear");
+                }
+                if let Some(path) = set_file {
+                    let config: Value = serde_json::from_str(
+                        &std::fs::read_to_string(&path)
+                            .with_context(|| format!("cannot read {}", path))?,
+                    )
+                    .context("OpenClaw config file must contain one JSON object")?;
+                    if !config.is_object() {
+                        bail!("OpenClaw config file must contain one JSON object");
+                    }
+                    r.request(
+                        Method::PUT,
+                        &r.path("openclaw-config")?,
+                        Some(json!({"config":config})),
+                        None,
+                    )
+                    .await?
+                } else if clear {
+                    r.request(
+                        Method::PUT,
+                        &r.path("openclaw-config")?,
+                        Some(json!({"config":null})),
+                        None,
+                    )
+                    .await?
+                } else {
+                    r.get(&r.path("openclaw-config")?).await?
                 }
             }
             AccountCommand::Status => r.get(r.path("")?.trim_end_matches('/')).await?,
