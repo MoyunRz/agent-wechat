@@ -158,14 +158,14 @@ watch(
     refreshAttempted.value = false
     loadRetried = false
     version.value = 0
-    if (special.value) {
-      avatarObjectUrl.value = null
+    // 身份变化（切换会话/联系人）：立即清掉上一任的头像字节。
+    // 新头像要 2-5 秒（gh_ 服务号走刷新轮询）才到，不清就会顶着别人的头像显示。
+    // 同身份的失效重取（SSE 重连）不走这里，保持旧图避免闪烁。
+    avatarObjectUrl.value = null
+    if (special.value)
       return
-    }
-    if (props.imageUrl?.trim()) {
-      avatarObjectUrl.value = null
+    if (props.imageUrl?.trim())
       return
-    }
     void loadAvatarBytes()
   },
   { immediate: true },
