@@ -152,7 +152,8 @@ onBeforeUnmount(() => {
       />
     </span>
 
-    <span class="voice-duration">{{ label }}</span>
+    <!-- 播放不了（语音暂不可用等）就不显示文案，只保留波形；可播放时显示秒数。 -->
+    <span v-if="playable" class="voice-duration">{{ label }}</span>
 
     <audio
       ref="audio"
