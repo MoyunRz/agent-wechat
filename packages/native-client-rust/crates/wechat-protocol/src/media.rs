@@ -555,7 +555,7 @@ impl CdnClient {
         let sequence = u32::try_from(integer(fields, "seq")?)?;
         ensure!(sequence != 0, "Invalid CDN sequence");
         ensure!(
-            ["/download", "/downloadbig", "/uploadv3"].contains(&path)
+            ["/download", "/downloadbig", "/downloadstorage", "/uploadv3"].contains(&path)
                 || large_file_path(path, self.config.uin, sequence),
             "Invalid CDN path"
         );
@@ -760,7 +760,28 @@ impl CdnClient {
             }
             fields.insert("wxmsgflag".into(), vec![]);
             fields.insert("fileid".into(), descriptor.file_id.as_bytes().to_vec());
-            let reply = post(if large { "/downloadbig" } else { "/download" }, &fields)?;
+            if let Some(key) = storage_key {
+                // The descriptor always carries its AES key, so the official
+                // client's conditional `nocheckaeskey` is always 1 here.
+                for (k, v) in [
+                    ("apptype", 10),
+                    ("isstorevideo", 0),
+                    ("nocheckaeskey", 1),
+                    ("enablehit", 1),
+                    ("existancecheck", 0),
+                ] {
+                    put(&mut fields, k, v);
+                }
+                fields.insert("filekey".into(), key.as_bytes().to_vec());
+            }
+            let path = if storage_key.is_some() {
+                "/downloadstorage"
+            } else if large {
+                "/downloadbig"
+            } else {
+                "/download"
+            };
+            let reply = post(path, &fields)?;
             let code = integer(&reply, "retcode")?;
             ServiceRejected::check_wide(Service::CdnDownload, code)?;
             let response_digest = reply
@@ -831,7 +852,7 @@ impl CdnClient {
             }
             if large {
                 validate_large_download_reply(&reply, descriptor, &mut server_md5)?;
-            } else if large_video {
+            } else if large_video && !server_selected {
                 validate_large_video_download_reply(&reply, descriptor, &mut server_md5)?;
             }
             let start = usize::try_from(integer(&reply, "rangestart")?)?;
@@ -845,11 +866,14 @@ impl CdnClient {
                     && !data.is_empty()
                     && size > 0
                     && size <= ciphertext_limit
-                    && expected_ciphertext.is_none_or(|expected| expected == size)
+                    && (server_selected
+                        || expected_ciphertext.is_none_or(|expected| expected == size))
                     && size >= position
                     && data.len() <= size - position
                     && end <= requested_end
-                    && (!strict_transfer || data.len() == (size - position).min(chunk_bytes))
+                    && (!strict_transfer
+                        || server_selected
+                        || data.len() == (size - position).min(chunk_bytes))
                     && (total == 0 || total == size)
                     && end == start + data.len() - 1,
                 "Inconsistent CDN range response"
@@ -924,7 +948,10 @@ impl CdnClient {
                 && expected.bytes().all(|b| b.is_ascii_hexdigit())
                 && digest.eq_ignore_ascii_case(expected)
         });
-        if observe_video && (size_rejected || digest_matches == Some(false)) {
+        if observe_video
+            && video_selected_response != Some(true)
+            && (size_rejected || digest_matches == Some(false))
+        {
             // Reject exactly as before, but keep comparison facts so a different
             // server-selected representation can be told apart from corruption.
             return Err(video_reply
@@ -1531,9 +1558,12 @@ pub struct UploadedVideo {
     pub original: Option<UploadedMedia>,
 }
 fn jpeg_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
-    jpeg_dimensions_with_limit(bytes, 65520)
+    jpeg_dimensions_with_limit(bytes, 65520, 4096)
 }
-fn jpeg_dimensions_with_limit(bytes: &[u8], max_bytes: usize) -> Result<(u32, u32)> {
+/// Standard and thumbnail copies obey the official small-object profile: at
+/// most `max_bytes` and a 4,096-pixel edge. A full-resolution original only
+/// obeys its byte budget, so it passes no pixel edge.
+fn jpeg_dimensions_with_limit(bytes: &[u8], max_bytes: usize, max_edge: u32) -> Result<(u32, u32)> {
     use image::GenericImageView;
     ensure!(
         !bytes.is_empty() && bytes.len() <= max_bytes,
@@ -1546,14 +1576,14 @@ fn jpeg_dimensions_with_limit(bytes: &[u8], max_bytes: usize) -> Result<(u32, u3
     let mut reader =
         image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Jpeg);
     let mut limits = image::Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
+    limits.max_image_width = Some(max_edge);
+    limits.max_image_height = Some(max_edge);
     limits.max_alloc = Some(64 * 1024 * 1024);
     reader.limits(limits);
     let image = reader.decode()?;
     let (w, h) = image.dimensions();
     ensure!(
-        w > 0 && h > 0 && w <= 4096 && h <= 4096,
+        w > 0 && h > 0 && w <= max_edge && h <= max_edge,
         "JPEG dimensions outside limit"
     );
     Ok((w, h))
@@ -1608,7 +1638,8 @@ impl PreparedImageUpload {
         key: &[u8],
         file_key: &str,
     ) -> Result<Self> {
-        let (width, height) = jpeg_dimensions_with_limit(original, MAX_NATIVE_UPLOAD_BYTES)?;
+        let (width, height) =
+            jpeg_dimensions_with_limit(original, MAX_NATIVE_UPLOAD_BYTES, u32::MAX)?;
         let original = PreparedUpload::with_material(
             original,
             MediaQuality::Original,
@@ -1638,7 +1669,8 @@ impl PreparedImageUpload {
         file_name: &str,
         destination: &str,
     ) -> Result<Self> {
-        let (width, height) = jpeg_dimensions_with_limit(original, MAX_NATIVE_UPLOAD_BYTES)?;
+        let (width, height) =
+            jpeg_dimensions_with_limit(original, MAX_NATIVE_UPLOAD_BYTES, u32::MAX)?;
         let original =
             PreparedUpload::prepare(original, MediaQuality::Original, file_name, destination)?;
         let standard = PreparedVariant::new(standard, &original.aes_key)?;
@@ -1657,7 +1689,8 @@ impl PreparedImageUpload {
         self.original.validate()?;
         let raw = decrypt_cdn(&self.original.encrypted, &self.original.aes_key)?;
         ensure!(
-            jpeg_dimensions_with_limit(&raw, MAX_NATIVE_UPLOAD_BYTES)? == (self.width, self.height),
+            jpeg_dimensions_with_limit(&raw, MAX_NATIVE_UPLOAD_BYTES, u32::MAX)?
+                == (self.width, self.height),
             "Prepared original dimensions differ"
         );
         self.standard.validate(&self.original.aes_key)?;
