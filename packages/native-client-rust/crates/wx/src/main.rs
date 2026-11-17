@@ -1,3 +1,4 @@
+mod contact_requests_cli;
 use anyhow::{bail, Context, Result};
 use clap::{Args, FromArgMatches, Parser, Subcommand};
 use serde_json::{json, Value};
@@ -392,6 +393,24 @@ enum ResourceAction {
 }
 #[derive(Subcommand)]
 enum ContactCommand {
+    /// Discover a person on WeChat by WeChat ID. Phone lookup is unverified.
+    Search {
+        /// Discovery query, distinct from local contacts find.
+        query: String,
+    },
+    /// Inspect, send, accept or locally delete friend-request conversations.
+    Requests {
+        #[command(subcommand)]
+        command: ContactRequestCommand,
+    },
+    /// Remove this account's contact relationship while preserving chat history.
+    Remove {
+        /// Exact existing ordinary contact ID.
+        id: String,
+        #[command(flatten)]
+        options: MutationOptions,
+    },
+
     #[command(flatten)]
     Catalog(CatalogCommand),
     /// Look up one or more known contact IDs on WeChat.
@@ -399,6 +418,63 @@ enum ContactCommand {
         /// Contact IDs to look up on WeChat; give one or more.
         #[arg(required = true)]
         ids: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContactRequestCommand {
+    /// List saved request conversations in both directions; history is not server pending proof.
+    List {
+        /// Filter by incoming or outgoing direction.
+        #[arg(long,value_parser=["incoming","outgoing"])]
+        direction: Option<String>,
+        /// Show only current incoming acceptance candidates.
+        #[arg(long)]
+        actionable: bool,
+        /// Match saved names, peer identities and verification text.
+        #[arg(long)]
+        search: Option<String>,
+        /// Maximum number of rows on this page, from 1 to 200.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Exact nextCursor from the same query.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Inspect one request, its verification history and current version.
+    Get {
+        /// Exact request ID from list.
+        id: String,
+    },
+    /// Send one friend request using an opaque result from contacts search.
+    Send {
+        /// Exact recipientRef from discovery on this account.
+        recipient_ref: String,
+        /// Owner-supplied verification greeting.
+        #[arg(long)]
+        message: String,
+        #[command(flatten)]
+        options: MutationOptions,
+    },
+    /// Accept the exact inspected version of an incoming request.
+    Accept {
+        /// Request ID from list/get.
+        id: String,
+        /// Current version returned by list/get.
+        #[arg(long)]
+        expected_version: String,
+        #[command(flatten)]
+        options: MutationOptions,
+    },
+    /// Delete local request conversation/history. Does not reject or cancel on WeChat.
+    Delete {
+        /// Request ID from list/get.
+        id: String,
+        /// Current version returned by list/get.
+        #[arg(long)]
+        expected_version: String,
+        #[command(flatten)]
+        options: MutationOptions,
     },
 }
 
@@ -1757,6 +1833,31 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Status => r.get("v1/status").await?,
         Command::Calls { command } => {
             return calls_cli::run(&r, command.context("choose a calls command")?, cli.json).await;
+        }
+        Command::Contacts {
+            command: Some(ContactCommand::Search { query }),
+            ..
+        } => {
+            r.post(&r.path("search/contacts")?, json!({"query":query}))
+                .await?
+        }
+        Command::Contacts {
+            command: Some(ContactCommand::Requests { command }),
+            ..
+        } => contact_requests_cli::requests(&r, &settings, command).await?,
+        Command::Contacts {
+            command: Some(ContactCommand::Remove { id, options }),
+            ..
+        } => {
+            client_actions::mutation(
+                &r,
+                &settings,
+                Method::DELETE,
+                &format!("contacts/{}", encode(&id)),
+                json!({}),
+                options,
+            )
+            .await?
         }
         Command::LookupContacts { ids }
         | Command::Contacts {

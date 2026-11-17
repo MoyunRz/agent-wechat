@@ -10,6 +10,7 @@ use serde::Serialize;
 use std::{fs, io::Read, path::Path};
 
 pub(crate) const LAYOUTS: &[(&str, &str)] = &[
+    ("general/general.db", include_str!("layout/general.db.sql")),
     ("contact/contact.db", include_str!("layout/contact.db.sql")),
     ("session/session.db", include_str!("layout/session.db.sql")),
     (

@@ -3,15 +3,14 @@
 // dependency, so listing.mjs can list them without Playwright.
 //
 // A scene opens `route` (a name from routeTable) with the parameters `target`
-// returns, once `setup` has seeded the simulator. `ready` waits for the screen to be
-// complete using roles and text; `actions` reaches states no address expresses.
+// returns, once `setup` has seeded the simulator. `ready` waits for the screen to
+// be complete using roles and text; `actions` reaches states no address expresses.
 // Screenshots are named `<scene>@<viewport>`, which is how Argos matches them to the
 // baseline, so renaming a scene or a viewport shows up as removed plus added. Each
 // scene is also captured in every translation as `<scene>@<viewport>@<language>`
 // (see capture.spec.mjs); `ready` and `actions` stay in English.
 import { ACCOUNT, SPARE } from "./accounts.mjs";
 import { desktopBridge, LEFTOVER_HUB_SETTINGS } from "./desktop.mjs";
-import { readFile } from "node:fs/promises";
 
 /** Desktop, phone and compact phone sizes for visual review. */
 export const viewports = {
@@ -31,7 +30,9 @@ export const FIXED_TIME = "2023-11-14T22:30:00Z";
 async function standardWorld(sim) {
   await sim.addAccount(ACCOUNT);
   await sim.signIn(ACCOUNT);
-  await sim.warmAvatars(["sim_mei", "sim_daniel"], ["MC", "DP"]);
+  // Initials of the fallback avatars the UI shows until the hub image arrives.
+  // ThreadAvatar.initials() keeps the first character only.
+  await sim.warmAvatars(["sim_mei", "sim_daniel"], ["M", "D"]);
   await sim.advance(120);
   await sim.inbound("sim_mei", "Are we still on for lunch tomorrow?");
   await sim.advance(45);
@@ -66,15 +67,15 @@ async function standardWorld(sim) {
   };
 }
 
-/** A row of the chat or contact list, found by the conversation's name rather than its preview text. */
-const row = (page, name) => page.locator(".chat-row").filter({ has: page.getByText(name, { exact: true }) });
+/** A row of the conversation list, found by the conversation's name rather than its preview text. */
+const row = (page, name) => page.locator(".thread-item").filter({ has: page.getByText(name, { exact: true }) });
+/** A row of the contact list, found by the contact's display name. */
+const contactRow = (page, name) => page.locator(".contact-row").filter({ has: page.getByText(name, { exact: true }) });
 /**
  * The sign-in code is random on every run; the countdown beside it is not. Masks
  * select by class, not text, so they also apply to the translated captures.
  */
-const qr = (page) => [page.locator("img.login-qr")];
-/** The hub address includes the port the scenes server happened to get. */
-const hubAddress = (page) => [page.locator("#hub-address")];
+const qr = (page) => [page.locator(".qr-frame img")];
 
 export const scenes = [
   {
@@ -88,63 +89,45 @@ export const scenes = [
     },
     target: () => ({ account: SPARE.id }),
     ready: async ({ page, expect }) => {
-      await expect(page.getByRole("heading", { name: "Sign in to WeChat" })).toBeVisible();
-      await expect(page.getByRole("img", { name: /sign-in QR code/ })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Sign in with WeChat QR code" })).toBeVisible();
+      await expect(page.getByRole("img", { name: "WeChat sign-in QR code" })).toBeVisible();
     },
     mask: qr,
   },
   {
-    name: "account-list",
-    route: "accounts",
-    description: "The accounts on a hub: one signed in and one that still needs a QR code.",
-    viewports: ["desktop", "narrow"],
-    setup: async (sim) => {
-      await sim.addAccount(ACCOUNT);
-      await sim.signIn(ACCOUNT);
-      await sim.addAccount(SPARE);
-      return {};
-    },
-    target: () => ({}),
-    ready: async ({ page, expect }) => {
-      await expect(page.getByRole("heading", { name: "Choose an account" })).toBeVisible();
-      await expect(page.getByText(SPARE.alias)).toBeVisible();
-      await expect(page.getByText("Open chats")).toBeVisible();
-    },
-  },
-  {
     name: "chat-list",
     route: "chats",
-    description: "The full inbox with category and conversation unread counts and the newest conversation open beside it.",
+    description: "The inbox with its filter tabs and unread badges, and the welcome pane beside it.",
     viewports: ["desktop", "narrow"],
     setup: standardWorld,
     target: () => ({ account: ACCOUNT.id }),
     ready: async ({ page, expect }) => {
       for (const name of ["Mei Chen", "Daniel Park", "Weekend trip"]) await expect(row(page, name)).toBeVisible();
-      await expect(page.getByRole("button", { name: /^DMs.*6 unread$/ })).toBeVisible();
+      await expect(page.locator(".filter-tabs").getByRole("button", { name: "All", exact: true })).toHaveClass(/active/);
+      await expect(page.locator(".unread-badge").first()).toBeVisible();
     },
   },
   {
     name: "chat-filters",
     route: "chats",
-    description: "The conversation filter bar with All pinned beside the scrolling categories and unread badges for categories with new messages.",
+    description: "The conversation filter tabs, the collapsed service categories and their unread badges.",
     viewports: ["desktop", "compact"],
     setup: standardWorld,
     target: () => ({ account: ACCOUNT.id }),
     prepare: async ({ page }) => {
-      // The simulator has no official or service accounts. Add those rows at the
-      // thread-list boundary while keeping the simulator's DM and group rows.
+      // The simulator has no official accounts or WeCom support chats. Add those
+      // rows at the thread-list boundary while keeping its DM and group rows.
       await page.route(/\/threads(?:\?.*)?$/, async (route) => {
         const response = await route.fetch();
         if (!response.ok()) return route.fulfill({ response });
         const threads = await response.json();
-        for (const [id, displayName, businessKind, businessType, unreadCount, text] of [
-          ["gh_scene_library", "City Library", "official_account", 0, 3, "New events this weekend"],
-          ["gh_scene_transit", "Metro Alerts", "service_account", 1, 12, "Your trip receipt is ready"],
+        for (const [id, displayName, unreadCount, text] of [
+          ["gh_scene_library", "City Library", 3, "New events this weekend"],
+          ["sim_scene_metro@openim", "Metro Alerts", 12, "Your trip receipt is ready"],
         ]) {
           threads.items.push({
             id, peerId: id, accountId: ACCOUNT.id, displayName, unreadCount,
             kind: "direct", readStateVersion: "0", history: null,
-            classification: { category: "business", namespace: "wechat", businessKind, businessType, openIm: null },
             lastMessage: { id: `${id}-1`, type: 1, text, senderId: id, senderName: displayName, direction: "incoming", createdAt: null },
           });
         }
@@ -156,73 +139,64 @@ export const scenes = [
         await expect(row(page, name)).toBeVisible();
     },
     actions: async ({ page, expect }) => {
-      const bar = page.getByRole("group", { name: "Conversation categories" });
-      const dm = bar.getByRole("button", { name: /^DMs/ });
-      const group = bar.getByRole("button", { name: /^Groups/ });
-      const official = bar.getByRole("button", { name: /^Official.*3 unread$/ });
-      const service = bar.getByRole("button", { name: /^Service.*12 unread$/ });
-      // The conversation initially open beside the list is marked read.
-      const all = bar.getByRole("button", { name: "All conversations 21 unread", exact: true });
-      await expect(all).toHaveAttribute("aria-pressed", "true");
+      const tabs = page.locator(".filter-tabs");
+      const tab = (name) => tabs.getByRole("button", { name, exact: true });
+      const all = tab("All");
+      const unread = tab("Unread");
+      const direct = tab("Direct");
+      const groups = tab("Groups");
+      const wecom = tab("WeCom");
+      const service = tab("Service Notifications");
+      const mei = row(page, "Mei Chen");
+      const daniel = row(page, "Daniel Park");
+      const trip = row(page, "Weekend trip");
       const library = row(page, "City Library");
       const metro = row(page, "Metro Alerts");
-      const mei = row(page, "Mei Chen");
-      const trip = row(page, "Weekend trip");
 
-      await dm.click();
-      await expect(all).toHaveAttribute("aria-pressed", "false");
+      await expect(all).toHaveClass(/active/);
+      await direct.click();
+      await expect(direct).toHaveClass(/active/);
       await expect(mei).toBeVisible();
+      await expect(daniel).toBeVisible();
       await expect(trip).toHaveCount(0);
       await expect(library).toHaveCount(0);
-      await expect(metro).toHaveCount(0);
-      await group.click();
-      await expect(mei).toBeVisible();
+      await unread.click();
+      await expect(unread).toHaveClass(/active/);
       await expect(trip).toBeVisible();
-      await page.reload();
-      await expect(dm).toHaveAttribute("aria-pressed", "true");
-      await expect(group).toHaveAttribute("aria-pressed", "true");
+      await groups.click();
+      await expect(groups).toHaveClass(/active/);
       await expect(trip).toBeVisible();
-      await expect(library).toHaveCount(0);
-      await all.click();
-      await expect(dm).toHaveAttribute("aria-pressed", "false");
-      await expect(group).toHaveAttribute("aria-pressed", "false");
-      await expect(library).toBeVisible();
-      await group.click();
-      await group.click();
-      await expect(all).toHaveAttribute("aria-pressed", "true");
-      await expect(library).toBeVisible();
+      await expect(mei).toHaveCount(0);
+      await wecom.click();
+      await expect(wecom).toHaveClass(/active/);
       await expect(metro).toBeVisible();
-
-      const scroller = bar.locator(".filter-scroller");
-      const right = bar.getByRole("button", { name: "Scroll categories right" });
-      const left = bar.getByRole("button", { name: "Scroll categories left" });
-      if (page.viewportSize().width === viewports.compact.width) {
-        await expect(right).toBeHidden();
-        await expect.poll(() => scroller.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeGreaterThan(0);
-      } else {
-        await page.setViewportSize({ ...viewports.desktop, width: 1100 });
-        await expect(left).toBeHidden();
-        await right.click();
-        await expect(right).toBeHidden();
-        await expect(left).toBeVisible();
-        await expect(service).toBeInViewport();
-        await page.setViewportSize(viewports.desktop);
-      }
-      await official.click();
+      await expect(mei).toHaveCount(0);
+      await service.click();
+      await expect(service).toHaveClass(/active/);
       await expect(library).toBeVisible();
       await expect(metro).toHaveCount(0);
       await expect(mei).toHaveCount(0);
-      await service.click();
-      await expect(metro).toBeVisible();
-      await expect(library).toBeVisible();
-      const search = page.getByRole("textbox", { name: "Search conversations" });
-      await search.fill("Metro");
+
+      // With no filter the categories collapse into one row each; opening them
+      // reveals the indented conversations.
+      await all.click();
+      await expect(all).toHaveClass(/active/);
+      await expect(trip).toBeVisible();
       await expect(library).toHaveCount(0);
+      const serviceCategory = page.locator(".thread-item.category-row").filter({ hasText: "Service Notifications" });
+      const wecomCategory = page.locator(".thread-item.category-row").filter({ hasText: "WeCom" });
+      await expect(serviceCategory).toBeVisible();
+      await serviceCategory.click();
+      await expect(library).toBeVisible();
+      await expect(library).toHaveClass(/nested/);
+      await wecomCategory.click();
       await expect(metro).toBeVisible();
-      await expect(official).toHaveAttribute("aria-pressed", "true");
-      await expect(all).toHaveAttribute("aria-pressed", "false");
-      await expect(all).toBeInViewport();
-      await expect(bar.getByRole("button", { name: "Groups 0 unread", exact: true }).locator(".filter-unread")).toHaveCount(0);
+
+      const search = page.getByPlaceholder("Search chats");
+      await search.fill("Mei");
+      await expect(mei).toBeVisible();
+      await expect(library).toHaveCount(0);
+      await expect(page.locator(".thread-item.category-row")).toHaveCount(0);
       await search.clear();
       await search.blur();
       await expect(library).toBeVisible();
@@ -236,9 +210,10 @@ export const scenes = [
     setup: standardWorld,
     target: (world) => ({ account: ACCOUNT.id, thread: world.mei }),
     ready: async ({ page, expect }) => {
+      await expect(page.locator(".chat-header h2")).toHaveText("Mei Chen");
       await expect(page.getByText("I booked the place near the station")).toBeVisible();
       await expect(page.getByText("Yes, noon works. Where should we meet?")).toBeVisible();
-      await expect(page.locator("img.media-preview")).toHaveCount(1);
+      await expect(page.locator("img.image-content")).toHaveCount(1);
     },
   },
   {
@@ -251,77 +226,13 @@ export const scenes = [
     ready: async ({ page, expect }) => {
       await expect(page.getByText("Who is driving on Saturday?")).toBeVisible();
       await expect(page.getByText("I can take my car, it fits four")).toBeVisible();
-      await expect(page.locator("img.media-preview")).toHaveCount(1);
+      await expect(page.locator("img.image-content")).toHaveCount(1);
     },
   },
   {
-    name: "unnamed-group-chat",
+    name: "quoted-replies",
     route: "chat",
-    description: "An unnamed group labeled with member names in the chat list and conversation header.",
-    viewports: ["desktop", "narrow"],
-    setup: async (sim) => {
-      await sim.addAccount(ACCOUNT);
-      await sim.signIn(ACCOUNT);
-      await sim.warmAvatars(["sim_mei", "sim_daniel"], ["MC", "DP"]);
-      const group = await sim.createGroup("", ["sim_mei", "sim_daniel"]);
-      await sim.inbound(group, "Has everyone picked a time?", { sender: "sim_mei" });
-      await sim.settled(group);
-      return { group };
-    },
-    target: (world) => ({ account: ACCOUNT.id, thread: world.group }),
-    ready: async ({ page, expect }) => {
-      const title = "Group chat · Daniel Park, Mei Chen";
-      await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-      if (page.viewportSize().width === viewports.desktop.width)
-        await expect(row(page, title)).toBeVisible();
-      await expect(page.locator(".workspace").getByText("Has everyone picked a time?", { exact: true })).toBeVisible();
-    },
-  },
-  {
-    name: "new-group-avatar",
-    route: "chats",
-    description: "A newly received group shows its room avatar while its member list is unavailable.",
-    viewports: ["desktop"],
-    setup: async (sim) => {
-      await sim.addAccount(ACCOUNT);
-      await sim.signIn(ACCOUNT);
-      return {
-        async receiveGroup() {
-          const group = await sim.createGroup("Neighborhood group", ["sim_mei", "sim_daniel"]);
-          await sim.advance(60);
-          await sim.inbound(group, "See you at the park.", { sender: "sim_mei" });
-          await sim.settled(group);
-        },
-      };
-    },
-    target: () => ({ account: ACCOUNT.id }),
-    ready: async ({ page, expect }) => {
-      await expect(row(page, "Mei Chen")).toBeVisible();
-      await expect(row(page, "Neighborhood group")).toHaveCount(0);
-    },
-    actions: async ({ page, expect, world }) => {
-      await page.route(/\/threads(?:\?.*)?$/, async (route) => {
-        const response = await route.fetch();
-        if (!response.ok()) return route.fulfill({ response });
-        const threads = await response.json();
-        // The hub can discover a room before its saved roster is available.
-        for (const thread of threads.items) {
-          if (thread.displayName === "Neighborhood group") thread.avatarMembers = [];
-        }
-        await route.fulfill({ response, json: threads });
-      });
-      await world.receiveGroup();
-      const avatar = row(page, "Neighborhood group").locator(".group-avatar img");
-      await expect(avatar).toBeVisible();
-      await expect.poll(() => avatar.evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
-    },
-    // The simulator generates a different image color for each random room ID.
-    mask: (page) => [row(page, "Neighborhood group").locator(".group-avatar img")],
-  },
-  {
-    name: "quoted-sender-names",
-    route: "chat",
-    description: "Quoted replies use supplied author names, cached names for older replies, and You for own messages.",
+    description: "Quoted replies show the author name supplied with the quote above the quoted excerpt.",
     viewports: ["desktop", "narrow"],
     setup: standardWorld,
     target: (world) => ({ account: ACCOUNT.id, thread: world.group }),
@@ -331,139 +242,177 @@ export const scenes = [
         const response = await route.fetch();
         if (!response.ok()) return route.fulfill({ response });
         const data = await response.json();
-        const samples = [
-          { senderId: "member@openim", senderName: "Example Member" },
-          { senderId: "sim_mei" },
-          { senderId: "sim_daniel", senderName: "Different supplied name", direction: "outgoing" },
-        ];
+        const authors = ["Example Member", "Mei Chen", "Daniel Park"];
         data.items = data.items.slice(0, 3).map((message, index) => ({
           ...message, type: 49, appMessageType: 57, body: `Reply ${index + 1}`,
-          quote: { type: 1, state: "embedded", serverId: `9900${index}`, embeddedText: `Quoted excerpt ${index + 1}`, ...samples[index] },
+          quote: {
+            type: 1,
+            state: "embedded",
+            serverId: `9900${index}`,
+            embeddedText: `Quoted excerpt ${index + 1}`,
+            senderName: authors[index],
+          },
         }));
         await route.fulfill({ response, json: data });
       });
     },
     ready: async ({ page, expect }) => {
-      const authors = page.locator(".quote-preview > strong");
+      const authors = page.locator(".quote-sender");
       await expect(authors).toHaveCount(3);
-      for (const author of ["Example Member", "Mei Chen", "You"])
+      for (const author of ["Example Member", "Mei Chen", "Daniel Park"])
         await expect(authors.filter({ hasText: new RegExp(`^${author}$`) })).toHaveCount(1);
     },
   },
   {
-    name: "message-highlight",
+    name: "message-deep-link",
     route: "message",
-    description: "A conversation opened at one message, which is highlighted.",
+    description: "A conversation opened at one message, which is scrolled into view.",
     viewports: ["desktop"],
-    setup: standardWorld,
+    setup: async (sim) => {
+      const world = await standardWorld(sim);
+      // Enough later messages that the target starts above the fold, so the
+      // screenshot proves the deep link scrolled to it rather than to the end.
+      for (let index = 1; index <= 14; index += 1) {
+        await sim.advance(10);
+        await sim.inbound(world.mei, `Later message ${index}`);
+      }
+      await sim.settled(world.mei, 14);
+      return world;
+    },
     target: (world) => ({ account: ACCOUNT.id, thread: world.mei, message: world.booked }),
-    ready: async ({ page, expect }) => {
-      await expect(page.locator(".message.quote-target")).toHaveCount(1);
-      await expect(page.locator(".message.quote-target")).toBeInViewport();
+    ready: async ({ page, expect, world }) => {
+      const target = page.locator(`[data-mid="${world.booked}"]`);
+      await expect(target).toHaveCount(1);
+      await expect(target).toBeInViewport();
+      await expect(page.locator("[data-mid]").last()).not.toBeInViewport();
     },
   },
   {
-    name: "media-viewer",
+    name: "image-lightbox",
     route: "media",
-    description: "The photo viewer open over a conversation, on the photo Mei sent.",
+    description: "The photo viewer opened over a conversation, on the photo Mei sent.",
     viewports: ["desktop", "narrow"],
     setup: standardWorld,
     target: (world) => ({ account: ACCOUNT.id, thread: world.mei, message: world.photo }),
     ready: async ({ page, expect }) => {
-      const viewer = page.getByRole("dialog", { name: "Media viewer" });
-      await expect(viewer).toBeVisible();
-      await expect(viewer.locator("img").first()).toBeVisible();
+      await expect(page.locator(".chat-header h2")).toHaveText("Mei Chen");
+      await expect(page.locator("img.image-content")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator("img.image-content").click();
+      await expect(page.locator(".lightbox img")).toBeVisible();
     },
   },
   {
     name: "chat-info",
     route: "info",
-    description: "Details of a group conversation with its pin, mute and group settings.",
+    description: "Details of a group conversation with its cached members and conversation flags.",
     viewports: ["desktop", "narrow"],
     setup: standardWorld,
     target: (world) => ({ account: ACCOUNT.id, thread: world.group }),
     ready: async ({ page, expect }) => {
-      await expect(page.getByRole("complementary", { name: "Conversation details" })).toBeVisible();
-      await expect(page.getByText("Group settings")).toBeVisible();
+      const details = page.locator(".chat-details");
+      await expect(details).toBeVisible();
+      await expect(details.locator(".details-head strong")).toHaveText("Conversation details");
+      await expect(details.locator(".details-profile strong")).toHaveText("Weekend trip");
+      await expect(details.getByText("Conversation type")).toBeVisible();
     },
     // The conversation ID of a group is random.
-    mask: (page) => [page.locator(".peer-id")],
+    mask: (page) => [page.locator(".chat-details code")],
   },
   {
     name: "contacts",
     route: "contacts",
-    description: "The contact list of an account.",
+    description: "The contact list of an account, grouped by contact kind.",
     viewports: ["desktop"],
     setup: standardWorld,
     target: () => ({ account: ACCOUNT.id }),
     ready: async ({ page, expect }) => {
-      await expect(page.getByRole("heading", { name: "Contacts" })).toBeVisible();
-      await expect(row(page, "Mei Chen")).toBeVisible();
+      await expect(page.locator(".contacts-panel h2")).toHaveText("Contacts");
+      await expect(contactRow(page, "Mei Chen")).toBeVisible();
+      await expect(contactRow(page, "Daniel Park")).toBeVisible();
     },
   },
   {
     name: "new-chat",
     route: "new-chat",
-    description: "The dialog for starting a direct conversation from the contact list.",
+    description: "The dialog for starting a direct conversation, searching the contact list.",
     viewports: ["desktop"],
     setup: standardWorld,
     target: () => ({ account: ACCOUNT.id }),
     ready: async ({ page, expect }) => {
-      const dialog = page.getByRole("dialog", { name: "New chat" });
+      const dialog = page.locator(".contact-dialog");
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByText("Daniel Park")).toBeVisible();
+      await expect(dialog.locator(".contact-head strong")).toHaveText("New chat");
     },
-  },
-  {
-    name: "new-group",
-    route: "new-chat",
-    description: "The new chat dialog on its New group tab, with two contacts chosen.",
-    viewports: ["desktop"],
-    setup: standardWorld,
-    target: () => ({ account: ACCOUNT.id }),
     actions: async ({ page, expect }) => {
-      const dialog = page.getByRole("dialog", { name: "New chat" });
-      await dialog.getByRole("tab", { name: "New group" }).click();
-      await dialog.getByLabel("Select Mei Chen").check();
-      await dialog.getByLabel("Select Daniel Park").check();
-      await expect(dialog.getByLabel("Select Daniel Park")).toBeChecked();
-    },
-    ready: async ({ page, expect }) => {
-      await expect(page.getByRole("dialog", { name: "New chat" })).toBeVisible();
+      const dialog = page.locator(".contact-dialog");
+      await dialog.getByPlaceholder("Search contacts or enter a WeChat ID").fill("Daniel");
+      const item = dialog.locator(".contact-item").filter({ hasText: "Daniel Park" });
+      await expect(item).toBeVisible();
     },
   },
   {
     name: "settings",
     route: "settings",
-    description: "Settings for the app, the hub and the signed-in account.",
+    description: "The settings popover that opens from its button in the rail.",
     viewports: ["desktop", "narrow"],
     setup: standardWorld,
     target: () => ({ account: ACCOUNT.id }),
     ready: async ({ page, expect }) => {
-      await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-      await expect(page.getByText("Automatic downloads")).toBeVisible();
+      const popover = page.locator(".settings-popover");
+      await expect(popover).toBeVisible();
+      await expect(popover.locator(".settings-head strong")).toHaveText("Interface settings");
+      await expect(popover.getByText("Media and cache")).toBeVisible();
     },
-    // The hub address carries the scenes server's port, and the cache totals depend on what was opened.
-    mask: (page) => [page.getByText(/^http:\/\/127\.0\.0\.1:\d+$/), page.locator(".cache-usage")],
   },
   {
-    name: "hub-picker",
-    route: "servers",
-    // The app leaves the hub picker's address when it starts with a hub open, so open
-    // the hub first and then go to the picker in the app, as a user would.
-    start: "accounts",
-    description: "The screen for choosing which hub to connect to.",
+    name: "ai-chat",
+    route: "chats",
+    description: "The AI chat panel, opened from the rail, with no service configured yet.",
     viewports: ["desktop", "narrow"],
-    setup: async (sim) => {
-      await sim.addAccount(ACCOUNT);
-      await sim.signIn(ACCOUNT);
-      return {};
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".thread-sidebar")).toBeVisible();
     },
+    actions: async ({ page, expect }) => {
+      await page.locator(".app-rail").getByTitle("AI Chat").click();
+      const panel = page.locator(".ai-page");
+      await expect(panel).toBeVisible();
+      await expect(panel.getByText("Start a new conversation with the AI assistant.")).toBeVisible();
+    },
+  },
+  {
+    name: "account-menu",
+    route: "chats",
+    description: "The account popover at the top of the rail, with its connection rows and sign-out.",
+    viewports: ["desktop"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".thread-sidebar")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator(".rail-avatar-button").click();
+      const popover = page.locator(".account-popover");
+      await expect(popover).toBeVisible();
+      await expect(popover.getByText("Alex Morgan", { exact: true })).toBeVisible();
+      await expect(popover.getByText("Sign out")).toBeVisible();
+    },
+  },
+  {
+    name: "desktop-hub-connect",
+    route: "servers",
+    description: "The desktop app's hub picker, shown when no hub has been connected yet.",
+    viewports: ["desktop", "narrow"],
+    setup: async () => ({}),
+    prepare: ({ page }) => desktopBridge(page, { settings: LEFTOVER_HUB_SETTINGS }),
     target: () => ({}),
     ready: async ({ page, expect }) => {
-      await expect(page.getByRole("heading", { name: "Connect to an agent-wechat hub" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Welcome to AgentWechat" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Use this device" })).toBeVisible();
     },
-    mask: hubAddress,
   },
   {
     name: "desktop-leftover-hub",

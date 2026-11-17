@@ -17,7 +17,7 @@ import { startStack } from "./stack.mjs";
  * then switches language in place (as another window changing the setting would)
  * and is captured again as `<scene>@<viewport>@<language>`.
  */
-const TRANSLATIONS = ["zh-CN"];
+const TRANSLATIONS = [{ name: "zh-CN", locale: "zh" }];
 
 /** Gitignored, next to the Playwright results; see playwright.config.mjs. */
 const outputRoot = resolve(dirname(fileURLToPath(import.meta.url)), ".scenes");
@@ -71,8 +71,11 @@ const test = base.extend({
 /** Resolves once nothing the UI asked the hub for is still in flight. Open event streams do not count. */
 function trackRequests(page) {
   const open = new Set();
-  const relevant = (request) =>
-    new URL(request.url()).pathname.startsWith("/v1/") && !(request.headers().accept ?? "").includes("text/event-stream");
+  const relevant = (request) => {
+    const path = new URL(request.url()).pathname;
+    return (path.startsWith("/v1/") || path.startsWith("/client/v1/"))
+      && !(request.headers().accept ?? "").includes("text/event-stream");
+  };
   page.on("request", (request) => relevant(request) && open.add(request));
   page.on("requestfinished", (request) => open.delete(request));
   page.on("requestfailed", (request) => open.delete(request));
@@ -88,8 +91,8 @@ function trackRequests(page) {
  * An avatar shows initials until its image arrives, and a photo a spinner or
  * placeholder, so initials of a contact whose avatar the hub has cached, or any
  * spinner or placeholder (every photo the scenes show is cached too), mean "not
- * yet". The UI only fetches what is on screen (an IntersectionObserver), so what a
- * collapsed pane hides, or what scrolled out of view, is not waited for.
+ * yet". The UI only fetches what is on screen, so what a collapsed pane hides, or
+ * what scrolled out of view, is not waited for.
  */
 async function settle(page, requests, avatarInitials) {
   await page.waitForFunction((initials) => {
@@ -97,10 +100,12 @@ async function settle(page, requests, avatarInitials) {
       const box = element.getBoundingClientRect();
       return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 && box.top < innerHeight && box.left < innerWidth;
     };
-    const avatarPending = [...document.querySelectorAll(".avatar")].some(
-      (avatar) => initials.includes(avatar.textContent.trim()) && !avatar.querySelector("img") && onScreen(avatar),
-    );
-    const photoPending = [...document.querySelectorAll(".media-spinner, .media-placeholder")].some(onScreen);
+    const avatarPending = [...document.querySelectorAll(".thread-avatar")].some((avatar) => {
+      if (avatar.querySelector("img") || !onScreen(avatar)) return false;
+      const fallback = avatar.querySelector(".fallback");
+      return Boolean(fallback) && initials.includes(fallback.textContent.trim());
+    });
+    const photoPending = [...document.querySelectorAll(".image-spinner, .image-placeholder")].some(onScreen);
     return !avatarPending && !photoPending;
   }, avatarInitials);
   await page.evaluate(() => document.fonts.ready);
@@ -108,6 +113,31 @@ async function settle(page, requests, avatarInitials) {
   await requests.idle();
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   await requests.idle();
+}
+
+/**
+ * Switches the interface language in place. The UI reads its locale from the i18n
+ * module, so the module's setter is called through the dev server's module graph
+ * rather than through a reload, which would lose the state the scene reached.
+ * Waiting for the rendered text to change also proves the module instance is the
+ * one the mounted app uses.
+ */
+async function translate(page, locale, language) {
+  const before = await page.evaluate(() => document.body.innerText);
+  await page.evaluate(async (next) => {
+    localStorage.setItem("vane.wechat.locale", next);
+    const { setLocale } = await import("/src/i18n/index.ts");
+    setLocale(next);
+  }, locale);
+  await page.waitForFunction(
+    ({ previous, lang }) => document.documentElement.lang === lang && document.body.innerText !== previous,
+    { previous: before, lang: language },
+  );
+}
+
+/** The scenes server keeps the hub token out of the bundle: the page receives it once through `?auth=`. */
+function sceneUrl(ui, stack, route) {
+  return `${ui.origin}/?auth=${encodeURIComponent(stack.hub.token)}${formatRoute(route)}`;
 }
 
 for (const scene of scenes) {
@@ -122,13 +152,9 @@ for (const scene of scenes) {
         const world = await scene.setup(sim);
         await scene.prepare?.({ page });
         const route = { name: scene.route, server: stack.hub.serverId, ...scene.target(world) };
-        if (scene.start) {
-          await page.goto(`${ui.origin}/${formatRoute({ name: scene.start, server: stack.hub.serverId, ...scene.target(world) })}`);
-          await page.waitForFunction(() => !!document.querySelector(".shell, .onboarding-shell") && !document.body.innerText.includes("Opening AgentWechat"));
-          await page.evaluate((hash) => { location.hash = hash; }, formatRoute(route));
-        } else {
-          await page.goto(`${ui.origin}/${formatRoute(route)}`);
-        }
+        await page.goto(sceneUrl(ui, stack, route));
+        await page.waitForSelector(".app-shell, .desktop-connect", { state: "attached" });
+        await page.waitForFunction(() => !document.querySelector(".boot-screen"));
         await scene.ready({ page, expect, world });
         await scene.actions?.({ page, expect, world });
         await settle(page, requests, sim.avatarInitials);
@@ -147,13 +173,9 @@ for (const scene of scenes) {
         const name = `${scene.name}@${viewport}`;
         await capture(name);
         for (const language of TRANSLATIONS) {
-          await page.evaluate((language) => {
-            localStorage.setItem("agentwechat-lang", language);
-            dispatchEvent(new StorageEvent("storage", { key: "agentwechat-lang", newValue: language }));
-          }, language);
-          await page.waitForFunction((language) => document.documentElement.lang === language, language);
+          await translate(page, language.locale, language.name);
           await settle(page, requests, sim.avatarInitials);
-          await capture(`${name}@${language}`);
+          await capture(`${name}@${language.name}`);
         }
         expect(errors, "uncaught page errors").toEqual([]);
       });

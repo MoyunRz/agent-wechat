@@ -13,8 +13,15 @@ test("the committed scene listing matches the scenes", async () => {
 });
 
 test("every route of the UI has at least one scene", () => {
+  // The browser build has no account list: the desktop shell owns hub and
+  // account selection, and the page shows the one account the hub returns.
+  // A link to the route parses but leaves the view alone, so no screen exists
+  // for a scene to capture. Every other route names a screen this build renders.
+  const noScreen = new Set(["accounts"]);
   const covered = new Set(scenes.map((scene) => scene.route));
-  const uncovered = routeTable.filter((entry) => !covered.has(entry.name)).map((entry) => entry.pattern);
+  const uncovered = routeTable
+    .filter((entry) => !covered.has(entry.name) && !noScreen.has(entry.name))
+    .map((entry) => entry.pattern);
   assert.deepEqual(uncovered, [], "add a scene in scenes/scenes.mjs for each route listed here");
 });
 
