@@ -177,3 +177,58 @@ VerifyUserRequest {
 4. 验证后关门 `{"enabled":false}`；频控与幂等已内置（重复提交不重发）
 
 UI 通过按钮（P0-a 已有申请卡片与「新的朋友」区块）仍在部署环境私有仓库中挂接——本 checkout 不含 37 投影与 friend-requests 端点，无法在此挂 UI；按钮语义：调用 accept 前置二次确认（display gate：`enabled=false` 时不显示或提示联系管理员开门）。
+
+## 10. Linux ELF 4.1.13 交叉验证 + 官方填充代码定位（2026-11-17，radare2 6.2.6 静态分析）
+
+> 目标二进制 `/opt/wechat/wechat`（181,205,660 B，ELF x86_64）。段映射：`.rodata` VA=文件偏移恒等；`.text` VA=file+0x1000（0x44ee000 起，0xA673EAC 止）；`.data.rel.ro` VA=file+0x2000（0xa67c290 起）。符号已剥离（仅 2 个动态导出）；C++ 符号名被混淆（typeinfo name 为 hex 串）。本轮工具：radare2（按 VA 寻址）+ 自写 rip 相对引用/call xref/立即数扫描器（`find_ref.py` / `find_call.py` / `find_opcode.py` / `find_glue.py`，在工作区根目录）。
+
+### 10.1 端点定位（与 Windows 不同形态）
+
+- 路径字符串 `/cgi-bin/micromsg-bin/verifyuser` @ VA `0x10124f4`（唯一一份，嵌在 MMTLS uri-hash 配置 blob 内，**无代码引用**）。Linux 端点描述符不是 .rdata 注册表，而是**业务 glue 函数栈上构造**。
+- **verifyuser 端点 glue `0x69280a0`** [硬]：栈上内联 `mov qword [rsp+0x10], 0x89`（**CGI=137**，与 Windows 一致）+ libc++ long string{cap=0x29(odd), size=0x20=32, ptr=heap} 装 32 字节 path（movups 从 `0x1012504`/`0x10124f4`），随后 0x170B 任务对象 ctor `0x6928300`：cgi→task+0xc、path string→task+0x18、标志→task+0x31/+0x33、**request@+0x88、response@+0x128**（ctor `0x7f26b30`）→ `GetRequest` 虚调用后 `CopyFrom(req, 调用者预填的 VerifyUserRequest)`（`0x7f26170`）。
+- 提交链 [硬]：`0x76be360`（协程续体，reloc `0xa9663a8` 引用）→ 填充函数 `0x69200e0` → glue `0x69280a0` → `0x6927dc0` → 适配器 `0x6927d10`（经服务 vtable `0xa8e4e40+5*8` 槽函数指针调用，typeinfo 名混淆）。
+- **newsync 对照 glue `0x61e52a0`** [硬]：同构栈描述符 {cgi=0x8a(138), path="/cgi-bin/micromsg-bin/newsync"(29B)}。→ **verifyuser 与 newsync 共用同一通用 CGI 任务提交机制（shortlink 任务形态），官方客户端对 verifyuser 无独立 transport 分支**；glue 描述符里没有 longlink command 字段（之前猜的 0x29 实为 libc++ string capacity）。
+
+### 10.2 消息类 vtable 地图（.data.rel.ro，Itanium ABI：[0]=D1、[1]=D0、[2]=GetFullName、[3]=New、[4]=Clear、[5]=IsInitialized、[6]=共享、[7]=CopyFrom、[8]=parse、[9]=ByteSizeLong、[10]=serialize、[11]=共享、[12]=尾 thunk）
+
+| 类 | vptr | GetFullName | New | parse | serialize | ByteSizeLong |
+|---|---|---|---|---|---|---|
+| micromsg.VerifyUser (0x88B) | `0xa9c5378` | `0x7f23f30` | `0x7f228e0` | `0x7f22bb0` | `0x7f235a0` | `0x7f238b0` |
+| micromsg.VerifyUserInfo (0x20B) | `0xa9c53f0` | `0x7f244a0` | `0x7f24130` | `0x7f241f0` | `0x7f24360` | `0x7f243b0` |
+| micromsg.VerifyUserRequest (0xa0B) | `0xa9c5468` | `0x7f26280` | `0x7f24cd0` | `0x7f24ec0` | `0x7f25a50` | `0x7f25cf0` |
+| micromsg.VerifyUserResponse | `0xa9c5558` | `0x7f27970` | `0x7f26f30` | `0x7f27080` | `0x7f27540` | `0x7f27660` |
+| 尾类（6 字段 int/string×3，ctor `0x7f279b0`，0x38B 级） | `0xa9c55d0` | — | — | — | — | — |
+
+### 10.3 字段表三方验证（ELF 上复核 Windows §2/§4 全部成立）[硬]
+
+- Request::IsInitialized `0x7f261a0`：`not eax; test al,7`（hasbits u32 @+0x98）→ **required 字段 1/2/3 与 Windows 一致**；随后按 +0x8（field1 BaseRequest）、+0x18/+0x20（field4 repeated）、0x200 bit→+0x70（field10）递归检查。
+- Request::parse `0x7f24ec0`：tag `0x22`（field4）快路径 alloc **0x88** + ctor `0x7f220b0`（VerifyUser）→ 挂 +0x18/+0x20 数组；另一臂 alloc **0x20** + ctor `0x7f23f50`（VerifyUserInfo）→ 挂 **+0x58/+0x60**（field9）。→ **field4=repeated VerifyUser、field9=repeated VerifyUserInfo、字段偏移 +0x08/+0x10/+0x14/…/hasbit@+0x98 与 Windows §2 完全一致**。
+- VerifyUserInfo ctor `0x7f23f50`：vptr `0xa9c53f0`、清 +0x18、strings@+0x8/+0x10 置共享空串（`0xad1e8b0`）→ 0x20 字节两 string 布局成立（Linux hasbit dword @+0x18，Windows @+0x1c，ABI 差异无碍）。
+
+### 10.4 官方填充函数 `0x69200e0`（Windows 侧 run3 未定位的关键缺口，本轮补上）[硬]
+
+```c
+// 0x69200e0(ctx_out, items, username_string, params) —— 栈上构建 VerifyUserRequest(rsp+0x180)
+req.field2_opcode = 1;                 // mov dword [rsp+0x190],1 ; hasbit|0x2 @0x692015b/0x6920163
+req.field3_scene  = 1;                 // mov dword [rsp+0x194],1 ; hasbit|0x4 @0x692047f/0x6920487
+req.field4 += VerifyUser{              // 循环逐个元素（0x69201c1: alloc 0x88 + ctor 0x7f220b0）
+  field1_string = username_string,     // or [r15+0x80],1 + string assign（arg3）
+  field14_msg   = { string = serialize(0x38B 六字段 biz 对象) }  // ctor 0x7ba6400；源对象 ctor 0x7f279b0(vptr 0xa9c55d0)，
+                                       // 6 字段 {int,string,int,string,int,string} 来自 params(+0x0/+0x8/+0x28/+0x30/+0x50/+0x58)
+};
+req.field7 += <int>;                   // repeated int32，容量增长 ×2 min 5（0x6920492 起）
+```
+
+- **opcode 与 scene 的实际取值是 1/1**（全二进制唯一 set_opcode 立即数点：rsp-disp32 对与 SIB-disp8 对两种形态扫描均仅命中 `0x69200e0`）。§2 的「opcode accept=3 [推]」与 §6 的 opcode=3/scene=15 模板**被硬证据推翻**。
+- 官方 accept 流程的载重字段是 **field4（VerifyUser 列表）而非 field9（VerifyUserInfo{encryptusername,ticket}）**；VerifyUserInfo 元素仅由 parse/New/合并辅助创建，业务代码零直接调用。
+- params 结构（arg4，r14）：+0x0 int→biz.f1、+0x4 flag、+0x8 string→biz.f2、+0x20 flag、+0x28 int→biz.f3、+0x2c flag、+0x30 string→biz.f4、+0x50 int→biz.f5、+0x54 flag、+0x58 string→biz.f6、+0x70 flag。
+
+### 10.5 对 -2 的重解读与下一步探针
+
+- 之前把「-2 + 空 payload + encryption=0」解读为「网关层拒绝、发生在 body 解析前」**不再成立**：官方客户端对 verifyuser 与读类 CGI 共用同一 shortlink 任务机制（§10.1），transport 假设排除。-2 与 **handler 参数校验失败**（required 缺失/opcode/scene 取值非法/形状不符）完全兼容。
+- 下一轮形状矩阵建议（按 §10.4 硬证据构造）：
+  1. `baseline2`：base + **opcode=1** + **scene=1** + field4=[VerifyUser{field1=encryptusername}]（不加 field9）
+  2. `baseline2+ticket`：VerifyUser 再挂 field2/field3（string）= ticket / 内容候选
+  3. `baseline2+biz`：VerifyUser.field14 = {string=ticket}（若服务端要求）
+  4. `baseline2+field7`：field7=[1] / [scene 相关 int]
+  - 响应 ret=0 或出现**非 -2** 的业务错误码即证明形状假设收敛；再迭代字段。

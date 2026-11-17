@@ -84,3 +84,13 @@ vtable/New/描述符构造均无直接调用者）。本地 PE 扫描（capstone
 1. 重新登录（UI 扫码）
 2. baseline 复测 → 若仍 -2，跑 `longlink:137` → `longlink:121` → 遍历 91/257 等候选
 3. 若 longlink 全部失败，从反汇编定位官方「写操作 CGI」的 transport 选择逻辑
+
+## 9. 2026-11-17 反汇编结论（Linux ELF 4.1.13，radare2）——§8 方案修订
+
+完整证据见 [verifyuser-protocol-spec.md §10](verifyuser-protocol-spec.md)。要点：
+
+1. **transport 假设排除 [硬]**：verifyuser 端点 glue `0x69280a0` 与 newsync glue `0x61e52a0` 同构（栈描述符 {cgi, path} + 通用任务对象 {cgi@+0xc, path@+0x18, request@+0x88, response@+0x128}），共用同一提交链（`0x76be360 → 0x69200e0 → 0x69280a0 → 0x6927dc0 → 0x6927d10`）。glue 描述符里没有 longlink command 字段——**`longlink:<cmd>` 候选遍历不再必要**（第 2 步可跳过）。
+2. **opcode/scene 硬证据**：官方填充函数 `0x69200e0` 写 **opcode(field2)=1、scene(field3)=1**，且载重字段是 **field4（repeated VerifyUser，元素 field1=字符串）**，不是 field9（VerifyUserInfo{encryptusername,ticket}）。本文件 §2 的形状矩阵与 §4 的 transport 探针都是围绕被推翻的模板设计的。
+3. **-2 重解读**：读类 CGI 正常 + 同一提交机制 → -2 与 handler 参数校验失败（形状/取值错）兼容，不必再归因网关或会话权限。
+
+**修订后的下一步**：按 spec §10.5 的 `baseline2` 矩阵重测（opcode=1 / scene=1 / field4 载重），在 `wechat-protocol/src/verify_user.rs` 加 `WX_VERIFY_PROBE=baseline2` 系列开关；ret=0 或出现非 -2 业务码即收敛。
