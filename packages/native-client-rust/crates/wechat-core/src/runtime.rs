@@ -159,6 +159,9 @@ pub struct CoreShared {
     /// chat without simulating real-time spacing.
     #[cfg(test)]
     pub(crate) send_pacing_secs: std::sync::atomic::AtomicU32,
+    /// Attachments whose whole content was checked, so a byte range of them can
+    /// be served without reading the rest; see `media_content_stream`.
+    pub(crate) verified_content: Mutex<crate::media::VerifiedContent>,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,
@@ -401,6 +404,7 @@ impl Core {
                 stopping: AtomicBool::new(false),
                 read_pools: Mutex::new(BTreeMap::new()),
                 media_cache: crate::media_cache::MediaDiskCache::new(media_cache_root),
+                verified_content: Mutex::new(Default::default()),
             }),
         });
         for account in core.store.accounts()? {
