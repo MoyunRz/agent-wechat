@@ -17,9 +17,8 @@ const MAX_TICKET_BYTES: usize = 16384;
 
 /// Opcode accepting the contact request carried in field9.
 pub const ACCEPT_OPCODE: u32 = 3;
-/// Opcode declining the contact request carried in field9. Candidate from the
-/// protocol spec {2=request, 3=accept, 4=decline}; the signed service reply
-/// validates it during rollout.
+/// Opcode declining the contact request carried in field9. The signed
+/// service reply validates the chosen opcode during rollout.
 pub const DECLINE_OPCODE: u32 = 4;
 
 /// One contact request to act on, exactly as received with that request.
@@ -78,9 +77,8 @@ pub fn encoded(
         "Invalid contact-request ticket"
     );
     let probe = std::env::var("WX_VERIFY_PROBE").unwrap_or_default();
-    // BaseRequest.task override: official12/official13 carry the task values
-    // noted in the spec under the official shape; task1/task12 apply the same
-    // override to the grey-scale field9 shape.
+    // BaseRequest.task override: the official request shape carries task=1 or
+    // task=12; task1/task12 apply the same override to the field9 shape.
     let task = match probe.as_str() {
         "official12" | "task1" => 1,
         "official13" | "task12" => 12,
@@ -94,10 +92,10 @@ pub fn encoded(
         p::bytes(1, input.encrypt_username.as_bytes()),
         p::bytes(2, input.ticket.as_bytes()),
     ])?;
-    // Official-shape probes per verifyuser-protocol-spec.md §10.4/§10.5: the
-    // official fill code writes opcode=1, scene=1, and carries the applicant
-    // material as repeated field4 VerifyUser{field1=username} entries — not
-    // the field9 VerifyUserInfo{encryptusername,ticket} template.
+    // Official-shape probe: the official fill code writes opcode=1, scene=1,
+    // and carries the applicant material as repeated field4
+    // VerifyUser{field1=username} entries — not the field9
+    // VerifyUserInfo{encryptusername,ticket} template.
     if probe.starts_with("official") {
         let identity = match probe.as_str() {
             // official10: the fill function's arg3 could be the logged-in
