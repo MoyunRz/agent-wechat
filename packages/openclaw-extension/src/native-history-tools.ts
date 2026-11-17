@@ -5,7 +5,7 @@ import { imageResultFromFile } from "openclaw/plugin-sdk/channel-actions";
 import { isNativeTombstone, NativeApiError, type NativeMessage } from "@agent-wechat/shared";
 import { resolveWeChatIngress, resolveWeChatPolicyContext } from "./access-control.ts";
 import { ensureNativeHost } from "./native-host.ts";
-import { prepareNativeAttachment } from "./native-media.ts";
+import { prepareNativeAttachment, type NativePrepareMediaParams } from "./native-media.ts";
 import { renderEmbeddedQuote } from "./native-quote.ts";
 import { getWeChatRuntime } from "./runtime.ts";
 import { resolveWeChatAccount } from "./types.ts";
@@ -44,7 +44,8 @@ function messageResult(message: NativeMessage, retrievalTool = "wechat_media", q
     attachment: message.type !== 1 && !isForward && kind !== "unsupported" ? { kind, retrievalTool, messageId: message.id } : undefined };
 }
 
-type Dependencies = { host?: typeof ensureNativeHost; core?: any };
+/** `saveMediaStream` replaces OpenClaw's streamed media store, for tests. */
+type Dependencies = { host?: typeof ensureNativeHost; core?: any; saveMediaStream?: NativePrepareMediaParams["saveMediaStream"] };
 
 /** These lookup tools use the profile API, independently of the intake buffer.
  * Every lookup is confined to the host's trusted current WeChat conversation.
@@ -160,8 +161,8 @@ function createLookupTools(context: OpenClawPluginToolContext, dependencies: Dep
             }
           };
           let prepared: Awaited<ReturnType<typeof prepareNativeAttachment>>;
-          try { prepared = await prepareNativeAttachment({ client, account, message, core, cfg,
-            quality: quality as typeof qualities[number], download: args.download !== false, waitMs: 2000, signal, assertCurrent: guard,
+          try { prepared = await prepareNativeAttachment({ client, account, message, core, cfg, saveMediaStream: dependencies.saveMediaStream,
+            quality: quality as typeof qualities[number], download: args.download !== false, waitMs: 2000, signal, assertCurrent: guard, channelsVideo: true,
             allowQuotedMessage: async original => original.direction === "outgoing" || await allowed(original.senderId ?? undefined),
             beforeMediaAccess: async () => {
               if (!await allowed(requesterSenderId) || (message.direction !== "outgoing" && !await allowed(message.senderId ?? undefined))) throw Error("WeChat conversation access is no longer allowed");
