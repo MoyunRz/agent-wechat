@@ -227,7 +227,9 @@ impl ProfileReader {
             {
                 return Err(ProfileError::InvalidMetadata);
             }
-            let relative = Path::new(directory).join(month).join(name);
+            // Forward slashes: the cache path is validated and joined as an
+            // official relative path on every platform, never `\`-separated.
+            let relative = std::path::PathBuf::from(format!("{directory}/{month}/{name}"));
             let (mut file, before, path) = match open_cache(
                 &self.snapshot.location.root,
                 &relative,

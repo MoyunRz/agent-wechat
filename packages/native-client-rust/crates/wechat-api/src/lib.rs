@@ -2542,7 +2542,9 @@ mod tests {
         assert_eq!(v["pid"], std::process::id());
         assert_eq!(v["ownershipGeneration"], core.ownership_generation);
         assert_eq!(v["version"]["backend"], "native");
-        assert!(v["dataDir"].as_str().unwrap().ends_with("/data"));
+        assert!(std::path::Path::new(v["dataDir"].as_str().unwrap())
+            .file_name()
+            .is_some_and(|name| name == "data"));
     }
     #[tokio::test]
     async fn grants_are_scoped_before_profile_io_and_revocation_is_immediate() {

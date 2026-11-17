@@ -551,6 +551,14 @@ impl Core {
                     1
                 };
                 let mut patch = self.upstream.contact_patch(&contact)?;
+                // The push's controlled remark copy is never applied directly: its
+                // version ordering is unmapped, so a queued exact lookup supplies
+                // the service's current remark instead (see `contact_remarks`).
+                for number in super::metadata::REMARK_FIELDS {
+                    if controlled.contains(&number.0) {
+                        patch.fields.remove(number.1);
+                    }
+                }
                 patch.fields.insert(
                     "local_type".into(),
                     wechat_profile::SqlValue::Integer(local_type.to_string()),

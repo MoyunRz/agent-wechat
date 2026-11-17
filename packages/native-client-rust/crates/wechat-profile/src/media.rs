@@ -297,7 +297,9 @@ impl ProfileReader {
             }
             let bytes = match read_cache(
                 &self.snapshot.location.root,
-                &Path::new(directory).join(month).join(name),
+                // Forward slashes: cache paths are validated as official
+                // relative paths on every platform, never `\`-separated.
+                &std::path::PathBuf::from(format!("{directory}/{month}/{name}")),
                 hardlink_limit(kind),
             ) {
                 Ok(b) => b,

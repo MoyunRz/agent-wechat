@@ -1250,10 +1250,12 @@ impl Core {
             );
         }
         let mut asset = asset;
+        let channels = self.channels_asset(account, &asset.id)?;
         let mut key = format!("download:{}", asset.id);
-        if self.channels_asset(account, &asset.id)? {
+        if channels {
             // A Channels video is renewable: when its cached file is gone, or its last transfer
-            // failed in a retryable way, a new request resolves fresh material in one new job.
+            // failed, an explicit new request resolves fresh material in one new job. Nothing
+            // retries automatically; each new job comes from a separate request.
             if asset.state == "available" && !self.store.media_asset_cached(account, &asset.id)? {
                 asset.state = "pending".into();
                 asset.actual_variant = None;
@@ -1273,8 +1275,7 @@ impl Core {
             while let Ok(previous) = self.store.media_job_by_key(account, &key) {
                 let renewable = match previous.state.as_str() {
                     "available" => asset.state != "available",
-                    "failed" => previous.retryable,
-                    "cancelled" | "expired" => true,
+                    "failed" | "cancelled" | "expired" => true,
                     _ => false,
                 };
                 if !renewable {
@@ -1286,10 +1287,14 @@ impl Core {
         if asset.state != "available" || asset.actual_variant != Some(asset.variant) {
             // Offline mode and failing downloads must not touch the CDN.
             ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
-            ensure!(
-                !self.media_fail_backoff_active(account, &asset.id)?,
-                "media_backoff"
-            );
+            // Channels videos renew on request against their own host and flow,
+            // so the CDN download fail-backoff does not govern them.
+            if !channels {
+                ensure!(
+                    !self.media_fail_backoff_active(account, &asset.id)?,
+                    "media_backoff"
+                );
+            }
             ensure!(!self.media_cdn_circuit_open(account)?, "media_circuit_open");
         }
         let id = format!("job_{}", uuid::Uuid::new_v4());
