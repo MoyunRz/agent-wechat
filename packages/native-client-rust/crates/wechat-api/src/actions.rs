@@ -41,6 +41,7 @@ pub(super) fn routes() -> Router<App> {
             "/v1/accounts/{a}/contacts/verify-user/gate",
             post(contact_gate),
         )
+        .api_route("/v1/accounts/{a}/offline", post(offline_mode))
         .api_route("/v1/accounts/{a}/friend-requests", get(friend_requests))
         .api_route(
             "/v1/accounts/{a}/friend-requests/{id}/preflight",
@@ -159,6 +160,20 @@ async fn friend_request_preflight(
 ) -> ApiResult<Json<Value>> {
     c.require(Some(&a), "read")?;
     Ok(Json(app.core.friend_request_preflight(&a, &id)?))
+}
+async fn offline_mode(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<contracts::NativeOfflineModeRequest>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "login")?;
+    let _guard = app.core.lock_account(&a).await?;
+    app.core.set_offline_mode(&a, input.enabled)?;
+    Ok(Json(json!({
+        "enabled": input.enabled,
+        "connection": if input.enabled { "disconnected" } else { "unchanged" },
+    })))
 }
 async fn accept_friend_request(
     State(app): State<App>,

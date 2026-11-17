@@ -237,6 +237,7 @@ impl Core {
         if self.stopping.load(Ordering::Acquire) {
             bail!("service_stopping");
         }
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         if key.is_empty() || key.len() > 200 {
             bail!("invalid_contact_accept_request");
         }

@@ -1045,6 +1045,7 @@ impl Core {
         operation: &str,
         action: MetadataAction,
     ) -> Result<Value> {
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         let deadline = Instant::now() + Duration::from_secs(120);
         self.metadata_check(account, operation, deadline)?;
         self.recover_metadata(account)?;

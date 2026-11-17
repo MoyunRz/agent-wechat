@@ -640,6 +640,15 @@ pub struct NativeContactGateRequest {
     /// starts closed for every account.
     pub enabled: bool,
 }
+/// Request to turn the account's offline mode on or off.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeOfflineModeRequest {
+    /// True to admit no WeChat server request and serve reads from the local
+    /// cache; false to allow connections again. Enabling also disconnects the
+    /// live connection; disabling does not reconnect by itself.
+    pub enabled: bool,
+}
 /// Request to mark a chat as read.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -783,6 +792,7 @@ pub fn typescript() -> String {
         NativeRecallRequest::decl(),
         NativeContactAcceptRequest::decl(),
         NativeContactGateRequest::decl(),
+        NativeOfflineModeRequest::decl(),
         NativeReadRequest::decl(),
         NativeForgetRequest::decl(),
         NativeMediaWritebackRequest::decl(),

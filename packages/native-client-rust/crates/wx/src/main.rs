@@ -314,6 +314,15 @@ enum AccountCommand {
         #[arg(long, value_parser = clap::value_parser!(u64).range(0..=512))]
         auto_download_max_mb: Option<u64>,
     },
+    /// Show or toggle this account's offline mode, which admits no WeChat server request and serves reads from the local cache.
+    Offline {
+        /// Turn offline mode on; the live connection is disconnected at once.
+        #[arg(long)]
+        on: bool,
+        /// Turn offline mode off; reconnecting stays manual.
+        #[arg(long)]
+        off: bool,
+    },
     /// Show features available to the selected account.
     Capabilities,
     /// Reconnect the selected account using its saved WeChat session.
@@ -1798,6 +1807,17 @@ async fn run(cli: Cli) -> Result<()> {
                     .await?
                 } else {
                     r.get(&path).await?
+                }
+            }
+            AccountCommand::Offline { on, off } => {
+                if on && off {
+                    bail!("choose only one of --on or --off");
+                }
+                if on || off {
+                    r.post(&r.path("offline")?, json!({"enabled":on})).await?
+                } else {
+                    let status = r.get(r.path("")?.trim_end_matches('/')).await?;
+                    json!({"enabled":status["offlineMode"].as_bool().unwrap_or(false)})
                 }
             }
             AccountCommand::Status => r.get(r.path("")?.trim_end_matches('/')).await?,

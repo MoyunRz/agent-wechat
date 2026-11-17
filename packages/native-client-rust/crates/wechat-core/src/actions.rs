@@ -110,6 +110,7 @@ impl Core {
         Ok(op)
     }
     pub fn sync_operation(self: &Arc<Self>, account: &str) -> Result<Operation> {
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         self.start_operation(account, "sync", |core, account| async move {
             core.sync(&account).await
         })

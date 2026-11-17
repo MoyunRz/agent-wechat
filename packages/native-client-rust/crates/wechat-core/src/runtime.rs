@@ -762,7 +762,7 @@ impl Core {
             "disconnected"
         };
         Ok(
-            json!({"id":record.id,"ownUsername":self.profile_username(account)?,"storageMode":record.storage_mode,"schemaCompatibility":record.schema_compatibility,"authenticated":auth,"connection":if auth&&desired==b"connected"{"online"}else if saved&&auto_connect&&desired==b"connected"{"reconnecting"}else{"disconnected"},"incomingTransport":incoming,"contactSyncReady":self.push_connected(account)&&(self.upstream.kind()==crate::upstream::UpstreamKind::Simulator||self.store.runtime(account,"contact-sync-ready")?.as_deref()==Some(self.ownership_generation.as_bytes())),"pendingProjectionBatches":self.store.pending_sync_count(account)?,"pendingCursorProjection":self.store.pending_cursor_projection(account)?,"pendingReadProjections":self.store.pending_reads(account)?,"pendingRecallProjections":self.store.pending_recall_projections(account)?,"pendingMessageRecalls":self.store.pending_message_recalls(account)?,"pendingSavedLoginProjection":self.store.runtime(account,"saved-login-projection-needed")?.is_some()||self.store.runtime(account,"saved-login-publication")?.is_some(),"profileRecoveryPending":self.store.runtime(account,"profile-recovery-pending")?.is_some(),"nativeRuntime":true,"alias":self.store.account_alias(account)?,"autoConnect":auto_connect}),
+            json!({"id":record.id,"ownUsername":self.profile_username(account)?,"storageMode":record.storage_mode,"schemaCompatibility":record.schema_compatibility,"authenticated":auth,"connection":if auth&&desired==b"connected"{"online"}else if saved&&auto_connect&&desired==b"connected"{"reconnecting"}else{"disconnected"},"incomingTransport":incoming,"contactSyncReady":self.push_connected(account)&&(self.upstream.kind()==crate::upstream::UpstreamKind::Simulator||self.store.runtime(account,"contact-sync-ready")?.as_deref()==Some(self.ownership_generation.as_bytes())),"pendingProjectionBatches":self.store.pending_sync_count(account)?,"pendingCursorProjection":self.store.pending_cursor_projection(account)?,"pendingReadProjections":self.store.pending_reads(account)?,"pendingRecallProjections":self.store.pending_recall_projections(account)?,"pendingMessageRecalls":self.store.pending_message_recalls(account)?,"pendingSavedLoginProjection":self.store.runtime(account,"saved-login-projection-needed")?.is_some()||self.store.runtime(account,"saved-login-publication")?.is_some(),"profileRecoveryPending":self.store.runtime(account,"profile-recovery-pending")?.is_some(),"offlineMode":self.offline_mode(account)?,"nativeRuntime":true,"alias":self.store.account_alias(account)?,"autoConnect":auto_connect}),
         )
     }
     pub fn disconnect(&self, account: &str) -> Result<()> {
@@ -780,6 +780,33 @@ impl Core {
             account,
             "account.updated",
             &json!({"accountId":account,"connection":"disconnected"}),
+        )?;
+        Ok(())
+    }
+    const OFFLINE_KEY: &str = "offline-mode";
+
+    /// True while the account runs in offline mode: no WeChat server request
+    /// is admitted, and every read comes from the local cache.
+    pub fn offline_mode(&self, account: &str) -> Result<bool> {
+        Ok(self.store.runtime(account, Self::OFFLINE_KEY)?.as_deref() == Some(b"1"))
+    }
+
+    /// Turn offline mode on or off. Enabling tears the live connection down
+    /// immediately; disabling does not reconnect by itself.
+    pub fn set_offline_mode(&self, account: &str, enabled: bool) -> Result<()> {
+        self.store.account(account)?;
+        self.store.put_runtime(
+            account,
+            Self::OFFLINE_KEY,
+            if enabled { b"1" } else { b"0" },
+        )?;
+        if enabled {
+            self.disconnect(account)?;
+        }
+        self.store.append_event(
+            account,
+            "account.offline_mode_changed",
+            &json!({"accountId": account, "enabled": enabled}),
         )?;
         Ok(())
     }
@@ -856,6 +883,7 @@ impl Core {
     ) -> Result<Operation> {
         self.store.account(account)?;
         self.require_profile_identity(account)?;
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         if request.force_qr {
             request.strategy = LoginStrategy::Qr;
         }
@@ -1528,6 +1556,7 @@ impl Core {
         if self.account_status(account)?["authenticated"] != true {
             bail!("auth_required");
         }
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         if (share.is_none() && text.is_empty())
             || text.len() > 64 * 1024
             || destination.is_empty()
@@ -2255,6 +2284,13 @@ impl Core {
                         break;
                     }
                     let desired = core.store.runtime(&account.id, "desired").ok().flatten();
+                    let offline = core
+                        .store
+                        .runtime(&account.id, "offline-mode")
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some(b"1");
                     let auto_disabled = core
                         .store
                         .runtime(&account.id, "auto-connect")
@@ -2269,7 +2305,7 @@ impl Core {
                             .flatten()
                             .as_deref()
                             != Some(core.ownership_generation.as_bytes());
-                    if desired.as_deref() != Some(b"connected") || auto_disabled {
+                    if desired.as_deref() != Some(b"connected") || auto_disabled || offline {
                         delay = 2;
                         continue;
                     }
@@ -4640,6 +4676,36 @@ mod tests {
         let core = Core::new(store, None).unwrap();
         assert!(core.profile_reader("fresh").is_ok());
         assert_eq!(core.account_state("fresh").unwrap().uin, 1);
+    }
+
+    #[test]
+    fn offline_mode_refuses_server_actions_and_disconnects() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        store.create_account("one").unwrap();
+        let core = Core::new(store.clone(), None).unwrap();
+        assert!(!core.offline_mode("one").unwrap());
+        store.put_runtime("one", "desired", b"connected").unwrap();
+        core.set_offline_mode("one", true).unwrap();
+        assert!(core.offline_mode("one").unwrap());
+        // Enabling tears the live connection down.
+        assert_eq!(
+            core.store.runtime("one", "desired").unwrap().as_deref(),
+            Some(b"disconnected".as_slice())
+        );
+        // Server-touching operations are refused outright.
+        assert!(core
+            .sync_operation("one")
+            .unwrap_err()
+            .to_string()
+            .contains("offline_mode_enabled"));
+        // Disabling does not reconnect by itself.
+        core.set_offline_mode("one", false).unwrap();
+        assert!(!core.offline_mode("one").unwrap());
+        assert_eq!(
+            core.store.runtime("one", "desired").unwrap().as_deref(),
+            Some(b"disconnected".as_slice())
+        );
     }
 
     #[test]

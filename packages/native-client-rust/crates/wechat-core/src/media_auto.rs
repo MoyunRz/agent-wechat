@@ -154,7 +154,7 @@ impl Core {
                 Err(error)
                     if matches!(
                         error.to_string().as_str(),
-                        "media_backoff" | "media_circuit_open"
+                        "media_backoff" | "media_circuit_open" | "offline_mode_enabled"
                     ) =>
                 {
                     // Transient degradation: keep the pending request for a

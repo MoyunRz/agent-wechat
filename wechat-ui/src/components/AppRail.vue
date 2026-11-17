@@ -12,6 +12,7 @@ const props = defineProps<{
   view: RailView
   accountRefreshing: boolean
   loggingOut: boolean
+  offlineToggling: boolean
   themes: UiTheme[]
   themeId: string
   themeMode: ThemeMode
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   'update:toastEnabled': [value: boolean]
   refreshAccount: []
   logout: []
+  toggleOffline: [enabled: boolean]
 }>()
 
 const incomingPresets = ['#eef1f6', '#ffffff', '#e8f1ff', '#e9f7ef', '#f1ecff', '#1a212c']
@@ -106,6 +108,10 @@ function refreshAccount(): void {
 function logout(): void {
   accountMenuOpen.value = false
   emit('logout')
+}
+
+function toggleOffline(): void {
+  emit('toggleOffline', !props.account.offlineMode)
 }
 
 function onFontSizeInput(event: Event): void {
@@ -329,9 +335,26 @@ async function purgeCache(seconds: number | null): Promise<void> {
             <span class="row-label">会话模式</span>
             <span class="row-value">独立 Hub</span>
           </div>
+          <div class="popover-row">
+            <span class="row-label">离线调试模式</span>
+            <span class="row-value" :data-tone="account.offlineMode ? 'pending' : 'offline'">
+              <span class="dot" />
+              {{ account.offlineMode ? '已开启 · 只读本地缓存' : '未开启' }}
+            </span>
+          </div>
         </div>
 
         <div class="popover-actions">
+          <button
+            type="button"
+            class="popover-action"
+            :disabled="offlineToggling"
+            :title="account.offlineMode ? '关闭后可重新连接微信服务器' : '开启后不请求微信服务器，只读本地缓存，适合调试 UI'"
+            @click="toggleOffline"
+          >
+            <Icon :name="account.offlineMode ? 'refresh' : 'settings'" :size="14" :class="{ spin: offlineToggling }" />
+            {{ account.offlineMode ? '关闭离线模式' : '开启离线模式' }}
+          </button>
           <button
             type="button"
             class="popover-action"

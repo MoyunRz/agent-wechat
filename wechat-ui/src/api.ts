@@ -255,6 +255,11 @@ export const wechatApi = {
     return request<AccountSummary>(`/accounts/${enc(accountId)}`)
   },
 
+  /** 开/关离线调试模式：开启后 daemon 不请求微信服务器，只读本地缓存。 */
+  setOfflineMode(accountId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+    return jsonRequest(`/accounts/${enc(accountId)}/offline`, 'POST', { enabled })
+  },
+
   createLoginAttempt(accountId: string, key = idempotencyKey('login')): Promise<LoginAttempt> {
     return jsonRequest<LoginAttempt>(
       `/accounts/${enc(accountId)}/login-attempts`,

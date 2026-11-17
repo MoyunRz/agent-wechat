@@ -23,6 +23,7 @@ export type AccountSummary = {
   contactSyncReady?: boolean
   nativeRuntime?: boolean
   storageMode?: string
+  offlineMode?: boolean
 }
 
 export type ThreadPreview = {

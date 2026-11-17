@@ -34,6 +34,9 @@ wx accounts disconnect | - | Disconnect the selected account while keeping its s
 wx accounts get | - | Show one account by ID or alias, or the selected account
 wx accounts get <ID> | position 1 | Account ID or alias from wx accounts list; omit for the selected account
 wx accounts list | - | List accounts on the selected server
+wx accounts offline | - | Show or toggle this account's offline mode, which admits no WeChat server request and serves reads from the local cache
+wx accounts offline --off | switch | Turn offline mode off; reconnecting stays manual
+wx accounts offline --on | switch | Turn offline mode on; the live connection is disconnected at once
 wx accounts remove | - | Remove a signed-out profile from the hub, retaining its local files
 wx accounts remove --confirm | required, takes <CONFIRM> | Repeat the exact account ID to confirm removal
 wx accounts remove <ID> | position 1, required | Account ID from wx accounts list

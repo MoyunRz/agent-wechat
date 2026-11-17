@@ -289,6 +289,7 @@ const qrFailed = ref(false)
 const qrObjectUrl = ref<string | null>(null)
 const qrNonce = ref(0)
 const loggingOut = ref(false)
+const offlineToggling = ref(false)
 const accountActionError = ref('')
 
 const threads = ref<Thread[]>([])
@@ -1540,6 +1541,25 @@ async function logoutAccount(): Promise<void> {
   }
   finally {
     loggingOut.value = false
+  }
+}
+
+/** 离线调试模式：开启后 daemon 不请求微信服务器，UI 只读本地缓存，方便热更新调试。 */
+async function toggleOfflineMode(enabled: boolean): Promise<void> {
+  const current = account.value
+  if (!current || offlineToggling.value)
+    return
+  offlineToggling.value = true
+  accountActionError.value = ''
+  try {
+    await wechatApi.setOfflineMode(current.id, enabled)
+    account.value = await wechatApi.getAccount(current.id)
+  }
+  catch (error) {
+    accountActionError.value = errorText(error)
+  }
+  finally {
+    offlineToggling.value = false
   }
 }
 
@@ -2936,9 +2956,11 @@ onBeforeUnmount(() => {
         :account-name="selfName || '微信'"
         :account-refreshing="manualRefreshing"
         :logging-out="loggingOut"
+        :offline-toggling="offlineToggling"
         :themes="UI_THEMES"
         @refresh-account="refreshAccount"
         @logout="logoutAccount"
+        @toggle-offline="toggleOfflineMode"
       />
 
       <!-- KeepAlive 保活：聊天列表/通讯录切换不再销毁重建，头像与滚动位置得以保留。 -->

@@ -1031,7 +1031,8 @@ impl Core {
             );
         }
         if asset.state != "available" || asset.actual_variant != Some(asset.variant) {
-            // A failing download must not be re-requested on every call.
+            // Offline mode and failing downloads must not touch the CDN.
+            ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
             ensure!(
                 !self.media_fail_backoff_active(account, &asset.id)?,
                 "media_backoff"
@@ -1087,6 +1088,7 @@ impl Core {
             request.video_quality = Some(request.video_quality.unwrap_or_default());
         }
         self.account_state(account)?;
+        ensure!(!self.offline_mode(account)?, "offline_mode_enabled");
         if self.store.send_by_key(account, key).is_ok() {
             bail!("idempotency_conflict");
         }

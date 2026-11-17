@@ -1532,6 +1532,13 @@ export type NativeContactGateRequest = {
  * starts closed for every account.
  */
 enabled: boolean, };
+export type NativeOfflineModeRequest = { 
+/**
+ * True to admit no WeChat server request and serve reads from the local
+ * cache; false to allow connections again. Enabling also disconnects the
+ * live connection; disabling does not reconnect by itself.
+ */
+enabled: boolean, };
 export type NativeReadRequest = { 
 /**
  * The chat's `readStateVersion` from when you read it. The request is refused if the chat has
