@@ -432,6 +432,18 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     })
     }
+    /// Latest event cursor; a fresh event consumer starts streaming from here
+    /// when it has no cursor of its own. Retention prunes old sequences, so a
+    /// brand-new consumer must not be pinned to the pruned cursor zero.
+    pub fn latest_event_cursor(&self, id: &str) -> Result<i64> {
+        self.control(id, |db| {
+            Ok(
+                db.query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+    }
     pub fn acknowledge(&self, id: &str, consumer: &str, cursor: i64) -> Result<()> {
         self.control(id,|db|{
         if consumer.is_empty() || consumer.len()>128 || cursor<0 {bail!("invalid consumer acknowledgement");}

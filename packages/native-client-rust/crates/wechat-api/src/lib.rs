@@ -1113,7 +1113,15 @@ async fn stream(
 ) -> ApiResult<Response> {
     c.require(Some(&a), "read")?;
     let last = headers.get("last-event-id").and_then(|v| v.to_str().ok());
-    let mut after = decimal(q.after.as_deref().or(last))?;
+    let mut after = match q.after.as_deref().or(last) {
+        // 首次连接不带 cursor：从当前事件头部开始，仅推送后续实时事件。
+        // 事件保留窗只留最近 1 万条，把新消费者钉在已修剪的 cursor 0 上
+        // 会让事件流永远无法建立（event_cursor_expired）。
+        // 显式 cursor 落在保留窗外时仍报 event_cursor_expired，客户端应
+        // 刷新自身状态后以无 cursor 重连。
+        None => app.core.store.latest_event_cursor(&a)?,
+        Some(value) => decimal(Some(value))?,
+    };
     app.core.store.events(&a, after, 1)?;
     let events = async_stream::stream! {
         yield Ok::<_,std::convert::Infallible>(Event::default().comment("connected"));
