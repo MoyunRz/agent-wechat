@@ -150,6 +150,14 @@ impl Connection {
             .filter(|next| *next != NOOP_SEQUENCE)
             .ok_or_else(|| anyhow::anyhow!("Longlink sequence exhausted"))?;
         let packet = AuthenticatedPacket::prepare(state, cgi, plain)?;
+        crate::trace::stage(
+            "longlink-send",
+            &[
+                ("cgi", cgi.to_string()),
+                ("command", command.to_string()),
+                ("sequence", sequence.to_string()),
+            ],
+        );
         before_submit()?;
         self.session
             .send_application(command, sequence, &packet.packet)?;

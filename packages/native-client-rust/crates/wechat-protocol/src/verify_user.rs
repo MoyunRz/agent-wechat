@@ -314,6 +314,14 @@ impl NativeClient {
         opcode: u32,
     ) -> Result<VerifyUserAcceptReply> {
         let request = zeroize::Zeroizing::new(encoded(state, input, opcode)?);
+        crate::trace::stage(
+            "verifyuser-encode",
+            &[
+                ("probe", std::env::var("WX_VERIFY_PROBE").unwrap_or_default()),
+                ("input_scene", input.scene.to_string()),
+                ("shape", crate::trace::shape(&request)),
+            ],
+        );
         // Grey-scale cross probe: swap the CGI number, the URL path, or send
         // via a dedicated longlink connection (WX_VERIFY_CROSS=longlink:<cmd>)
         // to distinguish a gateway-routing rejection from a request-body one.

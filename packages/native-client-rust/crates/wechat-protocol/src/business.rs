@@ -316,24 +316,38 @@ impl AuthenticatedPacket {
         } else {
             cbc(body, &key, Mode::Encrypt)?
         };
-        let packet = pack(
-            PacketPolicy {
-                client_version: state.device.client_version as u32,
-                uin: state.uin,
-                cookie: &state.cookie,
-                cgi,
-                original_length: plain.len(),
-                pre_encryption_length: body.len(),
-                key_version: 0,
-                cert_version: 39,
-                checksum: checksum(state.uin, plain),
-                compression: if compressed { 1 } else { 2 },
-                encryption: mode,
-                notice_id: crate::notice::notice_id(&encrypted)?,
-                sequence: u16::from_be_bytes(random()?),
-            },
-            &encrypted,
-        )?;
+        let policy = PacketPolicy {
+            client_version: state.device.client_version as u32,
+            uin: state.uin,
+            cookie: &state.cookie,
+            cgi,
+            original_length: plain.len(),
+            pre_encryption_length: body.len(),
+            key_version: 0,
+            cert_version: 39,
+            checksum: checksum(state.uin, plain),
+            compression: if compressed { 1 } else { 2 },
+            encryption: mode,
+            notice_id: crate::notice::notice_id(&encrypted)?,
+            sequence: u16::from_be_bytes(random()?),
+        };
+        let pack_trace: Vec<(&str, String)> = vec![
+            ("cgi", policy.cgi.to_string()),
+            ("client_version", policy.client_version.to_string()),
+            ("uin", policy.uin.to_string()),
+            ("cookie_len", policy.cookie.len().to_string()),
+            ("key_version", policy.key_version.to_string()),
+            ("cert_version", policy.cert_version.to_string()),
+            ("checksum", format!("{:08x}", policy.checksum)),
+            ("compression", policy.compression.to_string()),
+            ("encryption", policy.encryption.to_string()),
+            ("notice_id", policy.notice_id.to_string()),
+            ("sequence", policy.sequence.to_string()),
+            ("plain", plain.len().to_string()),
+            ("body", body.len().to_string()),
+        ];
+        let packet = pack(policy, &encrypted)?;
+        crate::trace::stage("pack", &pack_trace);
         Ok(Self {
             packet,
             cgi,
@@ -344,6 +358,22 @@ impl AuthenticatedPacket {
     /// Call only on the plaintext returned by the authenticated MMTLS transport.
     pub fn decode_verified_transport_reply(&self, input: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         let envelope = split(input)?;
+        crate::trace::stage(
+            "envelope",
+            &[
+                ("return_code", envelope.return_code.to_string()),
+                ("reply_cgi", envelope.cgi.to_string()),
+                ("encryption", envelope.encryption.to_string()),
+                ("compression", envelope.compression.to_string()),
+                ("cookie_len", envelope.cookie.len().to_string()),
+                ("payload", crate::trace::head(&envelope.payload, 32)),
+                ("original_length", envelope.original_length.to_string()),
+                (
+                    "pre_encryption_length",
+                    envelope.pre_encryption_length.to_string(),
+                ),
+            ],
+        );
         if let Err(rejection) =
             ServiceRejected::check(Service::NativeEnvelope, envelope.return_code)
         {
@@ -380,6 +410,13 @@ impl AuthenticatedPacket {
         ensure!(
             plain.len() == envelope.original_length,
             "Authenticated plaintext length mismatch"
+        );
+        crate::trace::stage(
+            "plain",
+            &[
+                ("len", plain.len().to_string()),
+                ("shape", crate::trace::shape(&plain)),
+            ],
         );
         Ok((plain, envelope.cookie))
     }

@@ -1068,6 +1068,16 @@ impl NativeClient {
         request: &[u8],
         before_submit: impl FnOnce() -> Result<()>,
     ) -> Result<Vec<u8>> {
+        crate::trace::stage(
+            "rpc-begin",
+            &[
+                ("cgi", cgi.to_string()),
+                ("path", path.to_string()),
+                ("host", state.short_host.clone()),
+                ("request", crate::trace::head(request, 0)),
+                ("shape", crate::trace::shape(request)),
+            ],
+        );
         let session = self.session(&state.long_host)?;
         let packet = AuthenticatedPacket::prepare(state, cgi, request)?;
         self.check_submission()?;
@@ -1079,6 +1089,10 @@ impl NativeClient {
             &packet.packet,
             self.options.timeout,
         )?;
+        crate::trace::stage(
+            "mmtls-reply",
+            &[("reply", crate::trace::head(&reply, 32))],
+        );
         let (plain, cookie) = packet.decode_verified_transport_reply(&reply)?;
         if !cookie.is_empty() {
             state.cookie = cookie;

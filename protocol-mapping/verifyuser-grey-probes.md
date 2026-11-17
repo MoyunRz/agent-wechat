@@ -181,3 +181,20 @@ task 变量从未传入 base_request）；SKBuiltinBuffer_t f14 形状（officia
    业务层调用者（发起点函数），或搜 oplog/`VerifyUserOpLog` 相关构造点；
 3. 服务器端 -2 IA 的「值」假设验证：对同一申请**先 getcontact 拉取申请人资料再 accept**、
    或 scene=15（扫码）特判材料。
+
+## 11. 链路追踪实装（2026-11-17，Linux 端）
+
+`WX_PROTOCOL_TRACE=1` 后 stderr 逐阶段输出 `wx-trace <ts> <stage> k=v…`：
+
+| stage | 内容 |
+|---|---|
+| `verifyuser-encode` | 探针名 / input_scene / 实际编码 shape（字段号+类型+长度） |
+| `rpc-begin` | cgi / path / host / 请求 shape |
+| `pack` | 包头全字段：client_version、uin、cookie_len、key_version、cert_version、checksum、compression、encryption、notice_id、sequence、plain/body 长度 |
+| `mmtls-reply` | 响应长度 + 32B hex 头 |
+| `envelope` | return_code / reply-cgi / encryption / compression / cookie_len / payload 32B hex 头 / 两个长度字段 |
+| `plain` | 解密后明文 shape |
+| `longlink-send` | longlink 通道的 cgi/command/sequence |
+
+只打长度、编码与密文 hex 头，不含 cookie、密钥与 ticket 明文。每一轮探针把 trace 与
+operation 审计事件对齐即可定位拒绝发生在哪一层（encode → pack → mmtls → envelope → handler）。
