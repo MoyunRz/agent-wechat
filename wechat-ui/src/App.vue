@@ -4,6 +4,7 @@ import brandLogoUrl from './assets/agent-wechat-logo.svg'
 import { hasHubAuth, invalidateAvatarCache, newIdempotencyKey, wechatApi, WechatApiError } from './api'
 import { sendFailureMessage, userFacingErrorMessage } from './errors'
 import { consumeEventStream } from './events'
+import { specialAvatarFor } from './special-avatars'
 import {
   compareMessages,
   connectionTone,
@@ -1053,6 +1054,10 @@ const peerIsStranger = computed(() => {
     return false
   // 公众号（gh_）与小程序/OpenIM 客服会话不依赖好友关系，保持界面安静。
   if (peer.startsWith('gh_') || peer.endsWith('@openim'))
+    return false
+  // 内置系统账号（朋友推荐消息/微信团队/文件传输助手/语音记事本等）与
+  // 品牌客服号同样不存在好友关系，不提示。
+  if (specialAvatarFor(peer, thread.displayName) || businessUsernames.value.has(peer))
     return false
   return !friendNames.value.has(peer)
 })
