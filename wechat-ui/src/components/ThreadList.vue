@@ -32,7 +32,7 @@ const FILTER_TABS: ReadonlyArray<{ mode: ThreadFilter, label: string }> = [
   { mode: 'unread', label: '未读' },
   { mode: 'direct', label: '单聊' },
   { mode: 'groups', label: '群聊' },
-  { mode: 'mini', label: '企业微信客服' },
+  { mode: 'mini', label: '企业微信' },
   { mode: 'official', label: '服务通知' },
 ]
 
@@ -54,7 +54,7 @@ function threadBucket(thread: Thread): 'direct' | 'groups' | 'mini' | 'official'
 
 /** 折叠聚合的分类：key 与分桶一致，图标与文案对应官方客户端的聚合入口。 */
 const COLLAPSED_CATEGORIES = {
-  mini: { label: '企业微信客服', icon: 'mini' },
+  mini: { label: '企业微信', icon: 'mini' },
   official: { label: '服务通知', icon: 'service' },
 } as const
 
@@ -277,12 +277,17 @@ defineExpose({ focusSearch })
             @click="toggleCategory(item.group.key)"
           >
             <span class="category-avatar" :class="`category-${item.group.icon}`">
+              <!-- 企业微信：与 ThreadAvatar 的企微兜底头像一致，双气泡白标 + 蓝色渐变。 -->
               <svg v-if="item.group.icon === 'mini'" viewBox="0 0 24 24" aria-hidden="true">
                 <path
-                  d="M16.1 6.6c-1.3-1.5-3.5-2-5.3-1.2-1.8.8-2.7 2.5-2.1 4 .5 1.3 1.9 1.8 3.5 2.2 1.6.4 3 1 3.5 2.2.6 1.5-.3 3.2-2.1 4-1.8.8-4 .3-5.3-1.2"
+                  d="M4.1 6A2.15 2.15 0 0 1 6.25 3.85h7.9A2.15 2.15 0 0 1 16.3 6v5.4a2.15 2.15 0 0 1-2.15 2.15H9.6l-3.9 3.1v-3.1h.55A2.15 2.15 0 0 1 4.1 11.4Z"
+                  fill="#fff"
+                />
+                <path
+                  d="M14.9 10.3h3a2.15 2.15 0 0 1 2.15 2.15v3.2a2.15 2.15 0 0 1-2.15 2.15h-.35v2.3l-2.85-2.3h-2a2.15 2.15 0 0 1-2-1.4"
                   fill="none"
                   stroke="#fff"
-                  stroke-width="1.9"
+                  stroke-width="1.6"
                   stroke-linecap="round"
                 />
               </svg>
@@ -368,7 +373,7 @@ defineExpose({ focusSearch })
         <p v-else-if="filterMode === 'unread'">没有未读消息</p>
         <p v-else-if="filterMode === 'groups'">还没有群聊</p>
         <p v-else-if="filterMode === 'direct'">还没有单聊</p>
-        <p v-else-if="filterMode === 'mini'">还没有企业微信客服会话</p>
+        <p v-else-if="filterMode === 'mini'">还没有企业微信会话</p>
         <p v-else-if="filterMode === 'official'">还没有服务号消息</p>
         <template v-else>
           <p>还没有聊天</p>
@@ -576,8 +581,8 @@ defineExpose({ focusSearch })
 }
 
 .category-mini {
-  background: linear-gradient(135deg, #7c6cf6, #5536d8);
-  box-shadow: 0 6px 16px rgba(124, 108, 246, 0.24);
+  background: linear-gradient(135deg, #4795ff, #1a6ce0);
+  box-shadow: 0 6px 16px rgba(71, 149, 255, 0.24);
 }
 
 .category-service {

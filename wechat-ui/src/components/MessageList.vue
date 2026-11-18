@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import brandLogoUrl from '../assets/agent-wechat-logo.svg'
 import { dayKey, dayLabel } from '../format'
 import type { AccountSummary, LocalMessage, MessageMediaMap, Thread } from '../types'
 import Icon from './Icon.vue'
@@ -152,7 +153,7 @@ defineExpose({
 <template>
   <div ref="scroller" class="message-scroll scrollbar-thin" @scroll.passive="onScroll">
     <div v-if="!thread" class="welcome-screen">
-      <span class="welcome-logo"><Icon name="message" :size="34" /></span>
+      <span class="welcome-logo"><img :src="brandLogoUrl" alt="" width="82" height="82"></span>
       <h2>Agent WeChat</h2>
       <p class="welcome-slogan">面向人与 AI 智能体的开源微信客户端</p>
       <span class="welcome-hint">从左侧会话列表选择一个聊天开始</span>
@@ -449,15 +450,17 @@ defineExpose({
 }
 
 .welcome-logo {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 82px;
   height: 82px;
   margin-bottom: 12px;
-  border-radius: 24px;
-  color: #eafff3;
-  background: linear-gradient(135deg, #22c55e, #0e9f6e);
-  box-shadow: 0 20px 44px rgba(34, 197, 94, 0.26);
+  filter: drop-shadow(0 16px 22px rgba(37, 126, 183, 0.16));
+}
+
+.welcome-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .welcome-screen h2 {

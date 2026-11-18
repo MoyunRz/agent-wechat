@@ -220,18 +220,33 @@ function memberStyle(member: ThreadAvatarMember): Record<string, string> {
       </span>
     </div>
     <span v-else-if="special" class="fallback special" :style="{ background: specialBackground }">
+      <!-- 文件传输助手：双向传输箭头，对应官方客户端的文件互传意象。 -->
       <svg v-if="special === 'filehelper'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M6 2.75h7.3L19.25 8.7V19A2.25 2.25 0 0 1 17 21.25H6A2.25 2.25 0 0 1 3.75 19V5A2.25 2.25 0 0 1 6 2.75z" fill="#fff" />
-        <path d="M12.1 17.4v-6M9.5 13.9l2.6-2.6 2.6 2.6" stroke="#0aa14c" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        <path d="M9.3 16.6v-9M9.3 7.6 6.7 10.2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        <path d="M14.7 7.4v9M14.7 16.4l2.6-2.6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
       </svg>
       <svg v-else-if="special === 'wechatpay'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M12 3.4c-4.6 0-8.35 3.2-8.35 7.13 0 2.23 1.16 4.22 2.99 5.56l-.62 2.86a.58.58 0 0 0 .84.64l3.5-1.96c.53.1 1.08.15 1.64.15 4.6 0 8.35-3.2 8.35-7.13S16.6 3.4 12 3.4z" fill="#fff" />
         <path d="m8.6 11.5 2.4 2.4 4.4-4.6" stroke="#089a4b" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none" />
       </svg>
+      <!-- 微信团队：经典双气泡微信标志。 -->
       <svg v-else-if="special === 'weixinTeam'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4.2c-4.5 0-8.15 2.86-8.15 6.38 0 2.03 1.18 3.83 3.02 4.99l-.75 3.42a.6.6 0 0 0 .88.66l3.85-2.14c.37.05.76.08 1.15.08 4.5 0 8.15-2.86 8.15-6.38S16.5 4.2 12 4.2z" fill="#fff" />
-        <circle cx="9.1" cy="10.3" r="1.05" fill="#089a4b" />
-        <circle cx="14.9" cy="10.3" r="1.05" fill="#089a4b" />
+        <path d="M10.1 4.5c-4.3 0-7.7 2.8-7.7 6.2 0 1.9 1.1 3.7 2.8 4.8l-.7 3.2 3.4-1.8c.7.2 1.4.3 2.2.3h.4a6 6 0 0 1-.3-1.9c0-3.2 3.2-5.8 7.2-5.8h.4c-.7-3-3.9-5-7.7-5Z" fill="#fff" />
+        <circle cx="7.7" cy="9.1" r="1" fill="#0aa14c" />
+        <circle cx="12.5" cy="9.1" r="1" fill="#0aa14c" />
+        <path d="M16.9 10.9c-2.9 0-5.2 1.8-5.2 4s2.3 4 5.2 4c.5 0 1-.1 1.5-.2l2.4 1.2-.6-2.1c1.1-.7 1.8-1.7 1.8-2.9 0-2.2-2.3-4-5.1-4Z" fill="#fff" />
+      </svg>
+      <!-- 朋友推荐消息：人像 + 加号，对应好友推荐语义。 -->
+      <svg v-else-if="special === 'friendSuggest'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10" cy="9" r="3.2" fill="#fff" />
+        <path d="M4.3 18.6a5.8 5.8 0 0 1 11.4 0c-1.5.9-3.4 1.4-5.7 1.4s-4.2-.5-5.7-1.4Z" fill="#fff" />
+        <path d="M17.6 7.7v4.2M15.5 9.8h4.2" stroke="#fff" stroke-width="1.9" stroke-linecap="round" fill="none" />
+      </svg>
+      <!-- 语音记事本：话筒，对应语音记录语义。 -->
+      <svg v-else-if="special === 'voiceMemo'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="9.5" y="4" width="5" height="9.2" rx="2.5" fill="#fff" />
+        <path d="M6.7 11.4a5.3 5.3 0 0 0 10.6 0" stroke="#fff" stroke-width="1.9" stroke-linecap="round" fill="none" />
+        <path d="M12 16.9v2.7M9.3 19.6h5.4" stroke="#fff" stroke-width="1.9" stroke-linecap="round" fill="none" />
       </svg>
       <svg v-else-if="special === 'service'" class="special-glyph" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M18.9 3.85a1.15 1.15 0 0 1 1.73 1v14.3a1.15 1.15 0 0 1-1.73 1L9.3 14.95H5.55A1.95 1.95 0 0 1 3.6 13v-2a1.95 1.95 0 0 1 1.95-1.95H9.3z" fill="#fff" />

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import brandLogoUrl from './assets/agent-wechat-logo.svg'
 import { hasHubAuth, invalidateAvatarCache, newIdempotencyKey, wechatApi, WechatApiError } from './api'
 import { sendFailureMessage, userFacingErrorMessage } from './errors'
 import { consumeEventStream } from './events'
@@ -280,6 +281,8 @@ const account = ref<AccountSummary | null>(null)
 const selfName = ref('')
 
 const loginAttempt = ref<LoginAttempt | null>(null)
+// daemon 上全部账号槽位：登录页的账号选择模态框用。
+const accountSlots = ref<AccountSummary[]>([])
 /** 每次页面加载只自动生成一次登录二维码；失败后走手动按钮。 */
 let autoLoginTriggered = false
 /** 缓存所属的微信账号身份；换号登录时不沿用旧缓存，防止串号展示。 */
@@ -1294,10 +1297,34 @@ async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
+/** 槽位是否"登录过"：在线会话或已保存登录（离线模式下 authenticated 为 false 但材料还在）。 */
+function isSignedIn(item: AccountSummary | null | undefined): boolean {
+  return Boolean(item && (item.authenticated || item.savedLogin))
+}
+
+const LAST_ACCOUNT_KEY = 'wx-last-account-id'
+
+function rememberAccountId(id: string): void {
+  try {
+    window.localStorage.setItem(LAST_ACCOUNT_KEY, id)
+  }
+  catch {
+    // 隐私模式等存储不可用时忽略：槽位记忆只是体验优化。
+  }
+}
+
 async function ensureAccount(): Promise<AccountSummary> {
   let items = await wechatApi.listAccounts()
-  if (items.length > 0)
-    return items[0]
+  // 优先回到上次使用的登录槽位，其次任意在线/已保存登录的槽位，最后才用第一个。
+  const lastId = window.localStorage.getItem(LAST_ACCOUNT_KEY)
+  const chosen = (lastId && items.find(item => item.id === lastId && isSignedIn(item)))
+    ?? items.find(item => item.authenticated)
+    ?? items.find(item => isSignedIn(item))
+    ?? items[0]
+  if (chosen) {
+    rememberAccountId(chosen.id)
+    return chosen
+  }
 
   try {
     return await wechatApi.createAccount()
@@ -1349,8 +1376,10 @@ async function bootstrap(): Promise<void> {
     // 先用上次保存的列表/目录瞬时铺底，网络刷新后自动替换。
     loadCachedSessionData()
     account.value = await ensureAccount()
+    void refreshAccountSlots()
     ensureCacheAccountMatch(account.value.ownUsername)
-    if (account.value.authenticated) {
+    if (isSignedIn(account.value)) {
+      // 离线模式（savedLogin）同样走这里：loadThreads/目录读的是本地缓存，不依赖在线会话。
       await loadSelfProfile()
       await loadThreads()
       void loadContactDirectory()
@@ -1518,6 +1547,31 @@ async function refreshAccount(): Promise<void> {
   }
 }
 
+/** 拉取全部账号槽位，供登录页模态框展示；失败静默，登录页仍可用当前槽位。 */
+async function refreshAccountSlots(): Promise<void> {
+  try {
+    accountSlots.value = await wechatApi.listAccounts()
+  }
+  catch {
+    // 保持旧列表即可。
+  }
+}
+
+/** 登录页切换到已有槽位：清掉当前二维码状态，从未登录过的槽位自动生成新二维码。 */
+function selectSlot(slot: AccountSummary): void {
+  if (loginBusy.value)
+    return
+  account.value = slot
+  rememberAccountId(slot.id)
+  loginAttempt.value = null
+  loginAttemptKey = ''
+  qrFailed.value = false
+  loginError.value = ''
+  // 已保存登录的槽位（含离线模式）直接进主界面，不再弹扫码。
+  if (!isSignedIn(slot))
+    void startLogin()
+}
+
 async function logoutAccount(): Promise<void> {
   const current = account.value
   if (!current || loggingOut.value)
@@ -1587,6 +1641,36 @@ async function startLogin(): Promise<void> {
   }
 }
 
+/**
+ * 新账号槽位登录：为另一个微信号创建独立账号槽位（设备/密钥/数据全隔离），
+ * 然后在新槽位上生成二维码。复用旧槽位扫新号会被微信拒绝——设备材料绑定的是原账号。
+ */
+async function loginWithNewSlot(): Promise<void> {
+  if (loginBusy.value)
+    return
+  loginBusy.value = true
+  loginError.value = ''
+  accountActionError.value = ''
+  qrFailed.value = false
+  loginAttempt.value = null
+  try {
+    const alias = `Vane-${Math.random().toString(36).slice(2, 6)}`
+    const created = await wechatApi.createAccount(alias)
+    account.value = created
+    rememberAccountId(created.id)
+    void refreshAccountSlots()
+    loginAttemptKey = newIdempotencyKey('login')
+    loginAttempt.value = await wechatApi.createLoginAttempt(created.id, loginAttemptKey)
+    scheduleLoginPoll()
+  }
+  catch (error) {
+    loginError.value = errorText(error)
+  }
+  finally {
+    loginBusy.value = false
+  }
+}
+
 function scheduleLoginPoll(delay = 900): void {
   loginTimer = clearTimer(loginTimer)
   if (disposed)
@@ -1609,6 +1693,8 @@ async function pollLogin(): Promise<void> {
     if (next.state === 'succeeded') {
       const latest = await wechatApi.getAccount(current.id)
       account.value = latest
+      rememberAccountId(current.id)
+      void refreshAccountSlots()
       if (latest.authenticated) {
         loginAttemptKey = ''
         await afterAuthenticated()
@@ -2910,7 +2996,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="app-shell">
     <div v-if="booting" class="boot-screen">
-      <span class="boot-logo"><Icon name="message" :size="26" /></span>
+      <span class="boot-logo"><img :src="brandLogoUrl" alt="Agent WeChat" width="58" height="58"></span>
       <span class="boot-spinner"><Icon name="refresh" :size="16" class="spin" /></span>
       <p>正在加载微信会话</p>
     </div>
@@ -2927,14 +3013,18 @@ onBeforeUnmount(() => {
     </div>
 
     <LoginPanel
-      v-else-if="account && !account.authenticated"
+      v-else-if="account && !isSignedIn(account)"
       :account="account"
       :attempt="loginAttempt"
       :qr-url="qrObjectUrl"
       :qr-failed="qrFailed"
       :busy="loginBusy"
       :error="loginError"
+      :slots="accountSlots"
       @start="startLogin"
+      @new-slot="loginWithNewSlot"
+      @select-slot="selectSlot"
+      @load-slots="refreshAccountSlots"
       @cancel="cancelLogin"
       @refresh="refreshAccount"
       @retry-qr="retryQr"
@@ -3062,7 +3152,7 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else>
-            <span class="brand-logo"><Icon name="message" :size="18" /></span>
+            <span class="brand-logo"><img :src="brandLogoUrl" alt="" width="34" height="34"></span>
             <div class="chat-title">
               <h2>Agent WeChat</h2>
               <p>面向人与 AI 智能体的开源微信客户端</p>
@@ -3371,9 +3461,16 @@ onBeforeUnmount(() => {
   width: 58px;
   height: 58px;
   border-radius: 18px;
-  color: #eafff3;
-  background: linear-gradient(135deg, #22c55e, #0e9f6e);
-  box-shadow: 0 16px 38px rgba(34, 197, 94, 0.24);
+}
+
+.boot-logo:not(.error) {
+  filter: drop-shadow(0 12px 18px rgba(37, 126, 183, 0.16));
+}
+
+.boot-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .boot-logo.error {
@@ -3632,15 +3729,16 @@ onBeforeUnmount(() => {
 }
 
 .brand-logo {
-  display: grid;
-  place-items: center;
+  display: block;
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
-  border-radius: 11px;
-  color: #eafff3;
-  background: linear-gradient(135deg, #22c55e, #0e9f6e);
-  box-shadow: 0 8px 20px rgba(34, 197, 94, 0.22);
+}
+
+.brand-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .chat-banner {

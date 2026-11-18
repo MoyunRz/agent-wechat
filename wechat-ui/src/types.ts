@@ -18,6 +18,8 @@ export type AccountSummary = {
   id: string
   alias: string | null
   authenticated: boolean
+  /** 已保存登录材料但会话未在线（如离线模式）：UI 以此区分"登录过但离线"与"从未登录"。 */
+  savedLogin?: boolean
   connection: string
   ownUsername: string | null
   contactSyncReady?: boolean

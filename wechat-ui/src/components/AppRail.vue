@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { wechatApi } from '../api'
 import { connectionLabel, connectionTone } from '../format'
 import type { AccountSettings, AccountSummary, ProactiveCacheKinds, RailView, ThemeMode, UiTheme } from '../types'
+import type { IconName } from './Icon.vue'
 import Icon from './Icon.vue'
 import ThreadAvatar from './ThreadAvatar.vue'
 
@@ -220,18 +221,33 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`
 }
 
-/** 清理当前账号的派生媒体缓存；confirm 挡住误触，结果用一行文案反馈。 */
-async function purgeCache(seconds: number | null): Promise<void> {
+/** 应用内确认弹窗：替代浏览器原生 confirm，保持界面风格统一。 */
+const purgeConfirm = ref<{ seconds: number | null, label: string } | null>(null)
+
+function requestPurge(seconds: number | null): void {
   if (purging.value)
     return
-  const label = CACHE_AGE_OPTIONS.find(option => option.seconds === seconds)?.label ?? '全部'
-  if (!window.confirm(`清理 ${label}之前的媒体缓存？只删除加速缓存文件，不影响聊天记录和收到的消息。`))
+  purgeConfirm.value = {
+    seconds,
+    label: CACHE_AGE_OPTIONS.find(option => option.seconds === seconds)?.label ?? '全部',
+  }
+}
+
+function cancelPurge(): void {
+  purgeConfirm.value = null
+}
+
+/** 清理当前账号的派生媒体缓存；结果用一行文案反馈。 */
+async function confirmPurge(): Promise<void> {
+  const pending = purgeConfirm.value
+  if (!pending || purging.value)
     return
+  purgeConfirm.value = null
   purging.value = true
   purgeResult.value = ''
   cacheError.value = ''
   try {
-    const result = await wechatApi.purgeMediaCache(props.account.id, seconds)
+    const result = await wechatApi.purgeMediaCache(props.account.id, pending.seconds)
     purgeResult.value = result.files > 0
       ? `已清理 ${result.files} 个缓存文件 · ${formatBytes(result.bytes)}`
       : '没有需要清理的缓存'
@@ -242,6 +258,27 @@ async function purgeCache(seconds: number | null): Promise<void> {
   finally {
     purging.value = false
   }
+}
+
+// —— 设置目录：面板只放分类入口，具体设置项收进对应模态框，避免长列表滚动。 ——
+type SettingsCategory = 'account' | 'appearance' | 'bubble' | 'notify' | 'cache'
+
+const SETTINGS_CATEGORIES: ReadonlyArray<{ key: SettingsCategory, label: string, icon: IconName, hint: string }> = [
+  { key: 'account', label: '账号与连接', icon: 'wifi', hint: '离线模式与连接状态' },
+  { key: 'appearance', label: '外观主题', icon: 'panel', hint: '深浅模式与界面颜色' },
+  { key: 'bubble', label: '气泡样式', icon: 'message', hint: '气泡颜色与字号' },
+  { key: 'notify', label: '消息通知', icon: 'clock', hint: '新消息提示卡片与时长' },
+  { key: 'cache', label: '媒体与缓存', icon: 'image', hint: '主动缓存与清理' },
+]
+
+const activeCategory = ref<SettingsCategory | null>(null)
+
+const activeCategoryMeta = computed(() =>
+  SETTINGS_CATEGORIES.find(category => category.key === activeCategory.value) ?? null,
+)
+
+function closeCategory(): void {
+  activeCategory.value = null
 }
 </script>
 
@@ -298,7 +335,7 @@ async function purgeCache(seconds: number | null): Promise<void> {
         title="OpenClaw 配置"
         @click="openOpenclaw"
       >
-        <Icon name="panel" :size="20" />
+        <Icon name="gpt" :size="20" />
       </button>
     </div>
 
@@ -361,16 +398,6 @@ async function purgeCache(seconds: number | null): Promise<void> {
           <button
             type="button"
             class="popover-action"
-            :disabled="offlineToggling"
-            :title="account.offlineMode ? '关闭后可重新连接微信服务器' : '开启后不请求微信服务器，只读本地缓存，适合调试 UI'"
-            @click="toggleOffline"
-          >
-            <Icon :name="account.offlineMode ? 'refresh' : 'settings'" :size="14" :class="{ spin: offlineToggling }" />
-            {{ account.offlineMode ? '关闭离线模式' : '开启离线模式' }}
-          </button>
-          <button
-            type="button"
-            class="popover-action"
             :disabled="accountRefreshing || loggingOut"
             @click="refreshAccount"
           >
@@ -402,203 +429,308 @@ async function purgeCache(seconds: number | null): Promise<void> {
           </button>
         </header>
 
-        <div class="settings-section">
-          <span class="settings-label">主题模式</span>
-          <div class="mode-switch">
-            <button
-              type="button"
-              :class="{ active: themeMode === 'dark' }"
-              @click="emit('update:themeMode', 'dark')"
-            >
-              深色
-            </button>
-            <button
-              type="button"
-              :class="{ active: themeMode === 'light' }"
-              @click="emit('update:themeMode', 'light')"
-            >
-              浅色
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <span class="settings-label">界面颜色</span>
-          <div class="theme-grid">
-            <button
-              v-for="theme in themes"
-              :key="theme.id"
-              type="button"
-              class="theme-swatch"
-              :class="{ active: theme.id === themeId }"
-              :style="{ background: theme.bubble }"
-              :title="theme.label"
-              @click="emit('update:themeId', theme.id)"
-            >
-              <Icon v-if="theme.id === themeId" name="check" :size="13" />
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <span class="settings-label">气泡颜色</span>
-
-          <div class="bubble-color-row">
-            <span class="bubble-color-label">对方</span>
-            <div class="bubble-color-controls">
-              <button
-                v-for="color in incomingPresets"
-                :key="color"
-                type="button"
-                class="bubble-swatch"
-                :class="{ active: bubbleInColor === color }"
-                :style="{ background: color }"
-                :title="color"
-                @click="emit('update:bubbleInColor', color)"
-              />
-              <label class="custom-color" title="自定义对方气泡颜色">
-                <span class="custom-color-preview" :style="{ background: incomingPreview }" />
-                <input type="color" :value="incomingPreview" @input="onBubbleColorInput('in', $event)">
-              </label>
-              <button
-                type="button"
-                class="color-auto"
-                :class="{ active: !bubbleInColor }"
-                @click="emit('update:bubbleInColor', '')"
-              >
-                自动
-              </button>
-            </div>
-          </div>
-
-          <div class="bubble-color-row">
-            <span class="bubble-color-label">我方</span>
-            <div class="bubble-color-controls">
-              <button
-                v-for="color in outgoingPresets"
-                :key="color"
-                type="button"
-                class="bubble-swatch"
-                :class="{ active: bubbleOutColor === color }"
-                :style="{ background: color }"
-                :title="color"
-                @click="emit('update:bubbleOutColor', color)"
-              />
-              <label class="custom-color" title="自定义我方气泡颜色">
-                <span class="custom-color-preview" :style="{ background: outgoingPreview }" />
-                <input type="color" :value="outgoingPreview" @input="onBubbleColorInput('out', $event)">
-              </label>
-              <button
-                type="button"
-                class="color-auto"
-                :class="{ active: !bubbleOutColor }"
-                @click="emit('update:bubbleOutColor', '')"
-              >
-                自动
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <div class="settings-row">
-            <span class="settings-label">气泡字号</span>
-            <span class="settings-value">{{ bubbleFontSize }}px</span>
-          </div>
-          <input
-            class="font-slider"
-            type="range"
-            min="12"
-            max="18"
-            step="0.5"
-            :value="bubbleFontSize"
-            @input="onFontSizeInput"
+        <!-- 目录：分类入口，点击弹出对应设置的模态框。 -->
+        <div class="settings-directory">
+          <button
+            v-for="category in SETTINGS_CATEGORIES"
+            :key="category.key"
+            type="button"
+            class="directory-row"
+            @click="activeCategory = category.key"
           >
-        </div>
-
-        <div class="settings-section">
-          <label class="settings-row settings-toggle">
-            <span class="settings-label">新消息提示卡片</span>
-            <span
-              class="toggle-switch"
-              :class="{ on: toastEnabled }"
-              role="switch"
-              :aria-checked="toastEnabled"
-              @click="emit('update:toastEnabled', !toastEnabled)"
-            >
-              <span class="toggle-knob" />
+            <span class="directory-icon">
+              <Icon :name="category.icon" :size="15" />
             </span>
-          </label>
-        </div>
-
-        <div v-if="toastEnabled" class="settings-section">
-          <div class="settings-row">
-            <span class="settings-label">新消息卡片消失时间</span>
-            <span class="settings-value">{{ toastSeconds }} 秒</span>
-          </div>
-          <input
-            class="font-slider"
-            type="range"
-            min="2"
-            max="30"
-            step="1"
-            :value="toastSeconds"
-            @input="onToastDurationInput"
-          >
-        </div>
-
-        <!-- 主动缓存：收到对应类型的消息时，daemon 自动下载并缓存，聊天打开即秒出。 -->
-        <div class="settings-section">
-          <div class="settings-row">
-            <span class="settings-label">主动缓存</span>
-            <span v-if="cacheLoading" class="settings-value">读取中…</span>
-          </div>
-          <div class="cache-kind-list">
-            <div
-              v-for="item in CACHE_KIND_ITEMS"
-              :key="item.key"
-              class="cache-kind-row"
-              :class="{ saving: cacheSavingKey === item.key }"
-              role="switch"
-              :aria-checked="cacheSettings?.proactiveCache?.[item.key] ?? true"
-              tabindex="0"
-              @click="toggleCacheKind(item.key)"
-              @keydown.enter.prevent="toggleCacheKind(item.key)"
-            >
-              <span class="cache-kind-text">
-                <span class="cache-kind-name">{{ item.label }}</span>
-                <span class="cache-kind-hint">{{ item.hint }}</span>
-              </span>
-              <span
-                class="toggle-switch"
-                :class="{ on: cacheSettings?.proactiveCache?.[item.key] ?? true }"
-              >
-                <span class="toggle-knob" />
-              </span>
-            </div>
-          </div>
-          <span v-if="cacheError" class="cache-error">{{ cacheError }}</span>
-        </div>
-
-        <!-- 缓存清理：删除派生加速缓存文件（按最后使用时间），不动聊天记录。 -->
-        <div class="settings-section">
-          <span class="settings-label">清理媒体缓存</span>
-          <div class="cache-purge-grid">
-            <button
-              v-for="option in CACHE_AGE_OPTIONS"
-              :key="option.label"
-              type="button"
-              class="cache-purge-btn"
-              :disabled="purging"
-              @click="purgeCache(option.seconds)"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-          <span v-if="purgeResult" class="cache-purge-result">{{ purgeResult }}</span>
-          <span v-if="purging" class="settings-value">清理中…</span>
+            <span class="directory-text">
+              <span class="directory-label">{{ category.label }}</span>
+              <span class="directory-hint">{{ category.hint }}</span>
+            </span>
+            <Icon class="directory-chevron" name="chevron-right" :size="14" />
+          </button>
         </div>
       </section>
+    </Transition>
+
+    <!-- 分类设置模态框：承载对应分类的具体设置项。 -->
+    <Transition name="fade">
+      <div v-if="activeCategory" class="settings-overlay" @click.self="closeCategory">
+        <section class="settings-modal" role="dialog" aria-modal="true" :aria-label="activeCategoryMeta?.label">
+          <header class="settings-modal-head">
+            <div>
+              <strong>{{ activeCategoryMeta?.label }}</strong>
+              <span>{{ activeCategoryMeta?.hint }}</span>
+            </div>
+            <button type="button" class="popover-close" title="关闭" @click="closeCategory">
+              <Icon name="close" :size="13" />
+            </button>
+          </header>
+
+          <div class="settings-modal-body">
+            <template v-if="activeCategory === 'appearance'">
+              <div class="settings-section">
+                <span class="settings-label">主题模式</span>
+                <div class="mode-switch">
+                  <button
+                    type="button"
+                    :class="{ active: themeMode === 'dark' }"
+                    @click="emit('update:themeMode', 'dark')"
+                  >
+                    深色
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: themeMode === 'light' }"
+                    @click="emit('update:themeMode', 'light')"
+                  >
+                    浅色
+                  </button>
+                </div>
+              </div>
+
+              <div class="settings-section">
+                <span class="settings-label">界面颜色</span>
+                <div class="theme-grid">
+                  <button
+                    v-for="theme in themes"
+                    :key="theme.id"
+                    type="button"
+                    class="theme-swatch"
+                    :class="{ active: theme.id === themeId }"
+                    :style="{ background: theme.bubble }"
+                    :title="theme.label"
+                    @click="emit('update:themeId', theme.id)"
+                  >
+                    <Icon v-if="theme.id === themeId" name="check" :size="13" />
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="activeCategory === 'bubble'">
+              <div class="settings-section">
+                <span class="settings-label">气泡颜色</span>
+
+                <div class="bubble-color-row">
+                  <span class="bubble-color-label">对方</span>
+                  <div class="bubble-color-controls">
+                    <button
+                      v-for="color in incomingPresets"
+                      :key="color"
+                      type="button"
+                      class="bubble-swatch"
+                      :class="{ active: bubbleInColor === color }"
+                      :style="{ background: color }"
+                      :title="color"
+                      @click="emit('update:bubbleInColor', color)"
+                    />
+                    <label class="custom-color" title="自定义对方气泡颜色">
+                      <span class="custom-color-preview" :style="{ background: incomingPreview }" />
+                      <input type="color" :value="incomingPreview" @input="onBubbleColorInput('in', $event)">
+                    </label>
+                    <button
+                      type="button"
+                      class="color-auto"
+                      :class="{ active: !bubbleInColor }"
+                      @click="emit('update:bubbleInColor', '')"
+                    >
+                      自动
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bubble-color-row">
+                  <span class="bubble-color-label">我方</span>
+                  <div class="bubble-color-controls">
+                    <button
+                      v-for="color in outgoingPresets"
+                      :key="color"
+                      type="button"
+                      class="bubble-swatch"
+                      :class="{ active: bubbleOutColor === color }"
+                      :style="{ background: color }"
+                      :title="color"
+                      @click="emit('update:bubbleOutColor', color)"
+                    />
+                    <label class="custom-color" title="自定义我方气泡颜色">
+                      <span class="custom-color-preview" :style="{ background: outgoingPreview }" />
+                      <input type="color" :value="outgoingPreview" @input="onBubbleColorInput('out', $event)">
+                    </label>
+                    <button
+                      type="button"
+                      class="color-auto"
+                      :class="{ active: !bubbleOutColor }"
+                      @click="emit('update:bubbleOutColor', '')"
+                    >
+                      自动
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">气泡字号</span>
+                  <span class="settings-value">{{ bubbleFontSize }}px</span>
+                </div>
+                <input
+                  class="font-slider"
+                  type="range"
+                  min="12"
+                  max="18"
+                  step="0.5"
+                  :value="bubbleFontSize"
+                  @input="onFontSizeInput"
+                >
+              </div>
+            </template>
+
+            <template v-else-if="activeCategory === 'notify'">
+              <div class="settings-section">
+                <label class="settings-row settings-toggle">
+                  <span class="settings-label">新消息提示卡片</span>
+                  <span
+                    class="toggle-switch"
+                    :class="{ on: toastEnabled }"
+                    role="switch"
+                    :aria-checked="toastEnabled"
+                    @click="emit('update:toastEnabled', !toastEnabled)"
+                  >
+                    <span class="toggle-knob" />
+                  </span>
+                </label>
+              </div>
+
+              <div v-if="toastEnabled" class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">新消息卡片消失时间</span>
+                  <span class="settings-value">{{ toastSeconds }} 秒</span>
+                </div>
+                <input
+                  class="font-slider"
+                  type="range"
+                  min="2"
+                  max="30"
+                  step="1"
+                  :value="toastSeconds"
+                  @input="onToastDurationInput"
+                >
+              </div>
+            </template>
+
+            <template v-else-if="activeCategory === 'account'">
+              <!-- 账号与连接：连接状态展示 + 离线模式开关（原账号菜单里的入口移到这里）。 -->
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">连接状态</span>
+                  <span class="settings-value" :data-tone="tone">
+                    <span class="dot" />
+                    {{ connectionLabel(account.connection, account.authenticated) }}
+                  </span>
+                </div>
+                <div class="settings-row">
+                  <span class="settings-label">会话模式</span>
+                  <span class="settings-value">独立 Hub</span>
+                </div>
+                <div class="settings-row">
+                  <span class="settings-label">离线调试模式</span>
+                  <span class="settings-value" :data-tone="account.offlineMode ? 'pending' : 'offline'">
+                    <span class="dot" />
+                    {{ account.offlineMode ? '已开启 · 只读本地缓存' : '未开启' }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="settings-section">
+                <span class="settings-label">离线模式</span>
+                <div
+                  class="cache-kind-row"
+                  :class="{ saving: offlineToggling }"
+                  role="switch"
+                  :aria-checked="account.offlineMode"
+                  tabindex="0"
+                  :title="account.offlineMode ? '关闭后重新连接微信服务器并恢复收发' : '开启后不请求微信服务器，只读本地缓存，适合调试 UI'"
+                  @click="toggleOffline"
+                  @keydown.enter.prevent="toggleOffline"
+                >
+                  <span class="cache-kind-text">
+                    <span class="cache-kind-name">{{ account.offlineMode ? '关闭离线模式' : '开启离线模式' }}</span>
+                    <span class="cache-kind-hint">{{ account.offlineMode ? '关闭后重新连接微信服务器' : '开启后不请求微信服务器，只读本地缓存' }}</span>
+                  </span>
+                  <span class="toggle-switch" :class="{ on: account.offlineMode }">
+                    <span class="toggle-knob" />
+                  </span>
+                </div>
+              </div>
+            </template>
+
+            <template v-else>
+              <!-- 主动缓存：收到对应类型的消息时，daemon 自动下载并缓存，聊天打开即秒出。 -->
+              <div class="settings-section">
+                <div class="settings-row">
+                  <span class="settings-label">主动缓存</span>
+                  <span v-if="cacheLoading" class="settings-value">读取中…</span>
+                </div>
+                <div class="cache-kind-list">
+                  <div
+                    v-for="item in CACHE_KIND_ITEMS"
+                    :key="item.key"
+                    class="cache-kind-row"
+                    :class="{ saving: cacheSavingKey === item.key }"
+                    role="switch"
+                    :aria-checked="cacheSettings?.proactiveCache?.[item.key] ?? true"
+                    tabindex="0"
+                    @click="toggleCacheKind(item.key)"
+                    @keydown.enter.prevent="toggleCacheKind(item.key)"
+                  >
+                    <span class="cache-kind-text">
+                      <span class="cache-kind-name">{{ item.label }}</span>
+                      <span class="cache-kind-hint">{{ item.hint }}</span>
+                    </span>
+                    <span
+                      class="toggle-switch"
+                      :class="{ on: cacheSettings?.proactiveCache?.[item.key] ?? true }"
+                    >
+                      <span class="toggle-knob" />
+                    </span>
+                  </div>
+                </div>
+                <span v-if="cacheError" class="cache-error">{{ cacheError }}</span>
+              </div>
+
+              <!-- 缓存清理：删除派生加速缓存文件（按最后使用时间），不动聊天记录。 -->
+              <div class="settings-section">
+                <span class="settings-label">清理媒体缓存</span>
+                <div class="cache-purge-grid">
+                  <button
+                    v-for="option in CACHE_AGE_OPTIONS"
+                    :key="option.label"
+                    type="button"
+                    class="cache-purge-btn"
+                    :disabled="purging"
+                    @click="requestPurge(option.seconds)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+                <span v-if="purgeResult" class="cache-purge-result">{{ purgeResult }}</span>
+                <span v-if="purging" class="settings-value">清理中…</span>
+              </div>
+            </template>
+          </div>
+        </section>
+
+        <!-- 缓存清理二次确认：应用内弹窗，替代浏览器原生 confirm。 -->
+        <div v-if="purgeConfirm" class="confirm-overlay" @click.self="cancelPurge">
+          <div class="confirm-card" role="alertdialog" aria-modal="true" aria-label="警告提示">
+            <h4>警告提示</h4>
+            <p>清理 {{ purgeConfirm.label }}之前的媒体缓存？只删除加速缓存文件，不影响聊天记录和收到的消息。</p>
+            <footer class="confirm-actions">
+              <button type="button" class="confirm-cancel" @click="cancelPurge">取消</button>
+              <button type="button" class="confirm-danger" @click="confirmPurge">清理</button>
+            </footer>
+          </div>
+        </div>
+      </div>
     </Transition>
   </nav>
 </template>
@@ -1077,9 +1209,31 @@ async function purgeCache(seconds: number | null): Promise<void> {
 }
 
 .settings-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.settings-value[data-tone="online"] {
+  color: var(--success-text);
+}
+
+.settings-value[data-tone="pending"] {
+  color: var(--warning);
+}
+
+.settings-value[data-tone="offline"] {
+  color: var(--muted);
+}
+
+.settings-value .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .theme-grid {
@@ -1221,5 +1375,213 @@ async function purgeCache(seconds: number | null): Promise<void> {
 .popover-leave-to {
   opacity: 0;
   transform: translateY(4px);
+}
+
+/* —— 设置目录 + 分类模态框 —— */
+.settings-directory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+}
+
+.directory-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-row:hover {
+  background: var(--panel-hover);
+}
+
+.directory-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--accent);
+}
+
+.directory-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.directory-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.directory-hint {
+  overflow: hidden;
+  color: var(--muted-soft);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-chevron {
+  flex: 0 0 auto;
+  color: var(--muted-soft);
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 12, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.settings-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(430px, 100%);
+  max-height: min(640px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--popover-bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.settings-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-modal-head strong {
+  display: block;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.settings-modal-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-soft);
+  font-size: 11.5px;
+}
+
+.settings-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  overflow: auto;
+}
+
+/* —— 缓存清理二次确认弹窗：叠在设置模态框之上 —— */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 12, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.confirm-card {
+  width: min(360px, 100%);
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--popover-bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  animation: confirm-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-card {
+    animation: none;
+  }
+}
+
+.confirm-card h4 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.confirm-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm-cancel {
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  transition: background 0.15s ease;
+}
+
+.confirm-cancel:hover {
+  background: var(--panel-hover);
+}
+
+.confirm-danger {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(248, 113, 113, 0.16);
+  color: var(--danger-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.confirm-danger:hover {
+  background: rgba(248, 113, 113, 0.26);
 }
 </style>

@@ -506,22 +506,23 @@ defineExpose({ focus })
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 9px 12px 8px;
+  padding: 10px 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--panel-elevated);
+  box-shadow: 0 1px 3px rgba(2, 6, 23, 0.14);
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .emoticon-panel {
   position: absolute;
   right: 8px;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   z-index: 30;
   width: min(328px, calc(100vw - 80px));
   padding: 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--panel-elevated);
   box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
 }
@@ -594,12 +595,12 @@ defineExpose({ focus })
 .mention-panel {
   position: absolute;
   left: 8px;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   z-index: 30;
   width: min(264px, calc(100vw - 120px));
   padding: 6px;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--panel-elevated);
   box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
 }
@@ -672,7 +673,7 @@ defineExpose({ focus })
 
 .composer-box:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .composer-box.disabled {
@@ -683,24 +684,24 @@ defineExpose({ focus })
   display: block;
   width: 100%;
   flex: 0 0 auto;
-  min-height: 37px;
+  min-height: 24px;
   max-height: 132px;
   margin: 0;
-  padding: 8px 0;
+  padding: 6px 0;
   border: 0;
   outline: none;
   resize: none;
   overflow-y: hidden;
   background: transparent;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.55;
   overflow-wrap: break-word;
   word-break: break-word;
 }
 
 .composer-box textarea::placeholder {
-  color: var(--muted);
+  color: var(--muted-soft);
   opacity: 1;
 }
 
@@ -847,26 +848,26 @@ defineExpose({ focus })
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  margin-top: 4px;
+  margin-top: 7px;
 }
 
 .composer-tools {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   flex: 0 0 auto;
 }
 
 .tool-button {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--muted-soft);
+  color: var(--muted);
   transition: background 0.16s ease, color 0.16s ease;
 }
 
@@ -901,26 +902,33 @@ defineExpose({ focus })
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 30px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 16px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--bubble-out);
   color: #fff;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   line-height: 1;
-  box-shadow: 0 2px 8px var(--accent-soft);
-  transition: filter 0.16s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+  box-shadow: 0 3px 10px var(--accent-soft);
+  transition: filter 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 
 .send-button:hover:not(:disabled) {
   filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px var(--accent-soft);
+}
+
+.send-button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .send-button:disabled {
-  opacity: 0.4;
+  background: var(--panel-hover);
+  color: var(--muted-soft);
   box-shadow: none;
 }
 

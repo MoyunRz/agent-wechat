@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import brandLogoUrl from '../assets/agent-wechat-logo.svg'
 import { connectionLabel, connectionTone } from '../format'
 import type { AccountSummary, LoginAttempt } from '../types'
 import Icon from './Icon.vue'
@@ -11,10 +12,15 @@ const props = defineProps<{
   qrFailed: boolean
   busy: boolean
   error: string
+  /** daemon 上已有的全部账号槽位，供登录页的账号选择模态框展示。 */
+  slots: AccountSummary[]
 }>()
 
 const emit = defineEmits<{
   start: []
+  newSlot: []
+  selectSlot: [slot: AccountSummary]
+  loadSlots: []
   cancel: []
   refresh: []
   retryQr: []
@@ -23,6 +29,24 @@ const emit = defineEmits<{
 
 const state = computed(() => props.attempt?.state ?? 'idle')
 const tone = computed(() => connectionTone(props.account.connection, props.account.authenticated))
+
+// 账号选择模态框：打开时通知父组件刷新槽位列表，避免展示过期状态。
+const pickerOpen = ref(false)
+
+function openPicker(): void {
+  pickerOpen.value = true
+  emit('loadSlots')
+}
+
+function chooseSlot(slot: AccountSummary): void {
+  pickerOpen.value = false
+  emit('selectSlot', slot)
+}
+
+function chooseNewSlot(): void {
+  pickerOpen.value = false
+  emit('newSlot')
+}
 
 const showQr = computed(() => {
   return state.value === 'awaiting_scan'
@@ -102,26 +126,8 @@ const canCancel = computed(() => {
 
     <div class="login-layout">
       <aside class="brand-panel">
-        <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 48 48" fill="none">
-            <defs>
-              <linearGradient id="vane-logo-surface" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#223042" />
-                <stop offset="1" stop-color="#0c121b" />
-              </linearGradient>
-              <linearGradient id="vane-logo-accent" x1="18" y1="16" x2="31" y2="32" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#34d399" />
-                <stop offset="1" stop-color="#16a34a" />
-              </linearGradient>
-            </defs>
-            <rect x="1" y="1" width="46" height="46" rx="14" fill="url(#vane-logo-surface)" stroke="rgba(52, 211, 153, 0.28)" />
-            <path
-              d="M13 18.5A5.5 5.5 0 0 1 18.5 13h11a5.5 5.5 0 0 1 5.5 5.5v5.2a5.5 5.5 0 0 1-5.5 5.5h-6.7l-5.8 4.2c-.66.48-1.58-.02-1.58-.82v-4.1A5.5 5.5 0 0 1 13 23.7v-5.2Z"
-              fill="#f8fafc"
-            />
-            <path d="m21.8 18.4-3.2 4.2 3.2 4.2" stroke="url(#vane-logo-accent)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="m27.6 18.4 3.2 4.2-3.2 4.2" stroke="url(#vane-logo-accent)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+        <div class="brand-mark">
+          <img :src="brandLogoUrl" alt="Agent WeChat" width="56" height="56">
         </div>
 
         <h1>把微信会话<br>放进同一个工作台</h1>
@@ -228,6 +234,17 @@ const canCancel = computed(() => {
               class="text-button"
               type="button"
               :disabled="busy"
+              title="选择已有的账号槽位，或为新微信号创建独立数据槽位"
+              @click="openPicker"
+            >
+              <Icon name="users" :size="13" />
+              选择登录账号
+            </button>
+
+            <button
+              class="text-button"
+              type="button"
+              :disabled="busy"
               @click="emit('refresh')"
             >
               <Icon name="refresh" :size="13" />
@@ -241,6 +258,42 @@ const canCancel = computed(() => {
           每个微信会话独立进程、独立数据，可同时登录多个账号
         </footer>
       </section>
+    </div>
+
+    <!-- 账号选择模态框：切换到已有槽位，或为新微信号创建独立槽位。 -->
+    <div v-if="pickerOpen" class="picker-overlay" @click.self="pickerOpen = false">
+      <div class="picker-modal" role="dialog" aria-modal="true" aria-label="选择登录账号">
+        <header class="picker-header">
+          <h3>选择登录账号</h3>
+          <button class="picker-close" type="button" aria-label="关闭" @click="pickerOpen = false">
+            <Icon name="close" :size="14" />
+          </button>
+        </header>
+
+        <div class="picker-list">
+          <button
+            v-for="slot in slots"
+            :key="slot.id"
+            class="picker-row"
+            :class="{ current: slot.id === props.account.id }"
+            type="button"
+            @click="chooseSlot(slot)"
+          >
+            <span class="picker-name">{{ slot.alias?.trim() || slot.id }}</span>
+            <span class="picker-state" :data-on="slot.authenticated || Boolean(slot.savedLogin)">
+              {{ slot.authenticated ? '已登录' : slot.savedLogin ? '离线' : '未登录' }}
+            </span>
+          </button>
+          <p v-if="slots.length === 0" class="picker-empty">暂无已有账号槽位</p>
+        </div>
+
+        <footer class="picker-footer">
+          <button class="picker-new" type="button" :disabled="busy" @click="chooseNewSlot">
+            <Icon name="plus" :size="14" />
+            登录新账号（创建独立槽位）
+          </button>
+        </footer>
+      </div>
     </div>
   </div>
 </template>
@@ -302,11 +355,11 @@ const canCancel = computed(() => {
   height: 56px;
   margin-bottom: 22px;
   border-radius: 17px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(52, 211, 153, 0.08);
+  filter: drop-shadow(0 12px 18px rgba(37, 126, 183, 0.16));
   animation: brand-mark-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.brand-mark svg {
+.brand-mark img {
   display: block;
   width: 100%;
   height: 100%;
@@ -439,6 +492,165 @@ const canCancel = computed(() => {
   margin: 3px 0 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 12, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.picker-modal {
+  width: min(400px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--popover-bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: picker-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes picker-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker-modal {
+    animation: none;
+  }
+}
+
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-header h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.picker-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.picker-close:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.picker-row:hover {
+  background: var(--panel-hover);
+}
+
+.picker-row.current {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.07);
+}
+
+.picker-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-state {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.picker-state[data-on="true"] {
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
+  color: var(--success-text);
+}
+
+.picker-empty {
+  margin: 6px;
+  color: var(--muted-soft);
+  font-size: 12px;
+  text-align: center;
+}
+
+.picker-footer {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.picker-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 11px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 13px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.picker-new:hover:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.06);
+  color: var(--text);
 }
 
 .connection-badge {
