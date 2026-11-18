@@ -324,7 +324,7 @@ enum AccountCommand {
         /// Turn offline mode on; the live connection is disconnected at once.
         #[arg(long)]
         on: bool,
-        /// Turn offline mode off; reconnecting stays manual.
+        /// Turn offline mode off; accounts with a saved login reconnect automatically.
         #[arg(long)]
         off: bool,
     },

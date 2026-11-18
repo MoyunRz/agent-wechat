@@ -798,7 +798,8 @@ impl Core {
     }
 
     /// Turn offline mode on or off. Enabling tears the live connection down
-    /// immediately; disabling does not reconnect by itself.
+    /// immediately; disabling records the desired connection again so the
+    /// account worker resumes from the saved login on its next tick.
     pub fn set_offline_mode(&self, account: &str, enabled: bool) -> Result<()> {
         self.store.account(account)?;
         self.store.put_runtime(
@@ -808,6 +809,15 @@ impl Core {
         )?;
         if enabled {
             self.disconnect(account)?;
+        } else if self.account_state(account).is_ok() {
+            // Only accounts with saved login materials can resume silently;
+            // without them the worker would just report auth_required.
+            self.store.put_runtime(account, "desired", b"connected")?;
+            self.store.append_event(
+                account,
+                "account.updated",
+                &json!({"accountId": account, "connection": "reconnecting"}),
+            )?;
         }
         self.store.append_event(
             account,
@@ -4707,12 +4717,21 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("offline_mode_enabled"));
-        // Disabling does not reconnect by itself.
+        // Disabling keeps the account signed out when no saved login exists.
         core.set_offline_mode("one", false).unwrap();
         assert!(!core.offline_mode("one").unwrap());
         assert_eq!(
             core.store.runtime("one", "desired").unwrap().as_deref(),
             Some(b"disconnected".as_slice())
+        );
+        // With saved login materials, disabling restores the desired
+        // connection so the account worker resumes from the saved login.
+        core.save_state("one", &state()).unwrap();
+        core.set_offline_mode("one", true).unwrap();
+        core.set_offline_mode("one", false).unwrap();
+        assert_eq!(
+            core.store.runtime("one", "desired").unwrap().as_deref(),
+            Some(b"connected".as_slice())
         );
     }
 
