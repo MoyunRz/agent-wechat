@@ -1,6 +1,6 @@
-# Public API of the wechat-platform crate (default features, x86_64-pc-windows-msvc). Generated from rustdoc JSON; do not edit.
+# Public API of the wechat-platform crate (default features, aarch64-apple-darwin). Generated from rustdoc JSON; do not edit.
 # Run `pnpm interfaces` after changing the crate. Format: ITEM | SIGNATURE | DOC SUMMARY
-const wechat_platform::NOFOLLOW | #[cfg(windows)] i32 | MISSING DOC
+const wechat_platform::NOFOLLOW | #[cfg(unix)] i32 | MISSING DOC
 fn wechat_platform::OpenOptions::append | fn(&mut self, value: bool) -> &mut Self | MISSING DOC
 fn wechat_platform::OpenOptions::create | fn(&mut self, value: bool) -> &mut Self | MISSING DOC
 fn wechat_platform::OpenOptions::create_new | fn(&mut self, value: bool) -> &mut Self | MISSING DOC
@@ -28,6 +28,7 @@ fn wechat_platform::process_identity | fn(pid: u32) -> core::option::Option<(all
 fn wechat_platform::protect | fn(file: &std::fs::File) -> std::io::error::Result<()> | MISSING DOC
 fn wechat_platform::protect_path | fn(path: &std::path::Path, directory: bool) -> std::io::error::Result<()> | MISSING DOC
 fn wechat_platform::publish_directory | fn(source: &std::path::Path, destination: &std::path::Path) -> std::io::error::Result<()> | Atomically publish a new directory, refusing any existing destination.
+fn wechat_platform::same_file | #[cfg(unix)] fn(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool | MISSING DOC
 fn wechat_platform::same_path_file | fn(path: &std::path::Path, file: &std::fs::File) -> std::io::error::Result<bool> | MISSING DOC
 fn wechat_platform::sync_dir | fn(path: &std::path::Path) -> std::io::error::Result<()> | Windows has no directory fsync equivalent; files are flushed before publication.
 fn wechat_platform::sync_file | fn(path: &std::path::Path) -> std::io::error::Result<()> | MISSING DOC
