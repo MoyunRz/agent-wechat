@@ -290,6 +290,30 @@ pub struct NativeContact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub classification: Option<wechat_core::PeerClassification>,
+    /// Current relationship settings, when available for this friend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy: Option<NativeContactPrivacySettings>,
+    /// Version to send as `expectedVersion` when changing this contact's privacy
+    /// or remark. It changes whenever either of them changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy_version: Option<String>,
+    /// True while an accepted relationship edit is awaiting contact sync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy_pending: Option<bool>,
+    /// True while an accepted remark change is waiting for WeChat's saved value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub remark_pending: Option<bool>,
+    /// Why a friend has no `privacy` or `privacyVersion`, so it can't be edited yet:
+    /// `contact_privacy_unresolved` (refresh the contact),
+    /// `ordinary_contact_required` (not supported for this contact),
+    /// `profile_identity_unavailable` or `contact_flags_unresolved`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy_unavailable: Option<String>,
 }
 /// A group chat saved in the account's profile.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
@@ -1193,10 +1217,31 @@ pub struct NativeContactPrivacySnapshots {
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeContactUpdate {
-    /// Desired settings; unrelated contact flags are preserved.
-    pub privacy: NativeContactPrivacySettings,
-    /// Version returned by the privacy read on this account.
+    /// Desired relationship settings; unrelated contact flags are preserved.
+    /// Send either `privacy` or `remark` in one request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy: Option<NativeContactPrivacySettings>,
+    /// New personal remark: a string sets it, `null` clears it, and omitting
+    /// it keeps the current remark. Outer whitespace is removed.
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional, type = "string | null")]
+    #[schemars(with = "Option<String>")]
+    pub remark: Option<Option<String>>,
+    /// Version from the contact's `privacyVersion` on this account.
     pub expected_version: String,
+}
+/// Keep an explicit `null` (clear) distinct from an omitted field (unchanged).
+fn present_value<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 /// Accept the inspected request with optional initial relationship privacy.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]

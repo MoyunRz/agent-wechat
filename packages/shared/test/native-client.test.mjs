@@ -595,9 +595,118 @@ test('media batch fallback probes an older hub once and keeps ordinary GET suppo
 
 test('unbound login posts to the account-less endpoint with the idempotency key', async () => {
   const calls = [];
-  const client = new NativeWeChatClient({ ...options, fetch: async (url, init) => { calls.push([new URL(url).pathname, init.method, init.headers.get('Idempotency-Key'), JSON.parse(init.body)]); return Response.json({ id: 'op', accountId: 'pending-login-x', kind: 'login', state: 'starting', result: {} }); } });
-  const operation = await client.loginUnbound({ strategy: 'qr' }, 'login-key');
-  assert.equal(operation.accountId, 'pending-login-x');
-  assert.deepEqual(calls, [['/v1/login-attempts', 'POST', 'login-key', { strategy: 'qr' }]]);
-  assert.throws(() => client.loginUnbound({}, 'bad\nkey'), /Invalid login idempotency key/);
+  const client = new NativeWeChatClient({ ...options, fetch: async (url, init) => {
+    calls.push([new URL(url).pathname, init.method ?? 'GET', init.headers.get('Idempotency-Key'), init.body]);
+    return Response.json({ id: 'job', state: 'queued' });
+  } });
+  await client.customStickers('a');
+  await client.customSticker('a', 'sticker');
+  await client.prepareSticker('a', { sourceId: 'owned', fit: true, trim: null }, 'stable');
+  await client.stickerPreparation('a', 'job');
+  assert.deepEqual(calls.map(c => c[0]), ['/v1/accounts/a/custom-stickers','/v1/accounts/a/custom-stickers/sticker','/v1/accounts/a/sticker-preparations','/v1/accounts/a/sticker-preparations/job']);
+  assert.deepEqual(calls.map(c => c[1]), ['GET','GET','POST','GET']);
+  assert.equal(calls[2][2], 'stable');
+  assert.deepEqual(JSON.parse(calls[2][3]), { sourceId:'owned', fit:true, trim:null });
+  assert.throws(() => client.prepareSticker('a', { sourceId:'owned', fit:false }, ''), /idempotency/);
+});
+test('Saved operations preserve REST methods, preconditions and keys without starting work on GET',async()=>{
+  const calls=[];const revision='a'.repeat(64);
+  const client=new NativeWeChatClient({...options,fetch:async(url,init)=>{
+    calls.push({path:new URL(url).pathname,method:init.method??'GET',key:init.headers.get('Idempotency-Key'),match:init.headers.get('If-Match'),body:init.body?JSON.parse(init.body):null});
+    return Response.json({id:'job',state:'queued'});
+  }});
+  await client.customStickers('a');await client.customSticker('a','chosen');
+  await client.addCustomSticker('a',{source:{kind:'prepared',preparationId:'prepared'}},'add');
+  await client.moveCustomSticker('a','chosen',{position:{afterId:null}},revision,'move');
+  await client.removeCustomSticker('a','chosen',revision,'remove');
+  await client.syncStickers('a',{scope:'saved'},'sync');
+  await client.downloadSticker('a',{stickerId:'chosen'},'download');
+  assert.deepEqual(calls.map(c=>c.method),['GET','GET','POST','PATCH','DELETE','POST','POST']);
+  assert.equal(calls[3].match,`"${revision}"`);assert.equal(calls[4].match,`"${revision}"`);
+  assert.deepEqual(calls[3].body,{position:{afterId:null}});assert.equal(calls[4].body,null);
+  assert.deepEqual(calls.map(c=>c.key),[null,null,'add','move','remove','sync','download']);
+});
+test('pack reads stay separate from membership, acquisition and sticker sending', async () => {
+  const calls=[];
+  const client=new NativeWeChatClient({...options,fetch:async(url,init)=>{
+    calls.push({url:new URL(url),method:init.method??'GET',key:init.headers.get('Idempotency-Key'),body:init.body?JSON.parse(init.body):null});
+    return Response.json({id:'job',state:'queued'});
+  }});
+  await client.stickerPacks('a',{membership:'added'});
+  await client.stickerPack('a','pack/opaque');
+  await client.stickerPackItems('a','pack/opaque');
+  await client.addStickerPack('a','pack/opaque','add-pack');
+  await client.removeStickerPack('a','pack/opaque','remove-pack');
+  await client.downloadSticker('a',{packId:'pack/opaque'},'acquire-pack');
+  await client.sendSticker('a',{kind:'sticker',threadId:'peer',source:{kind:'pack',packId:'pack/opaque',stickerId:'chosen'}},'send-sticker');
+  assert.deepEqual(calls.map(c=>c.method),['GET','GET','GET','PUT','DELETE','POST','POST']);
+  assert.equal(calls[0].url.search,'?membership=added');
+  assert.ok(calls[1].url.pathname.endsWith('/sticker-packs/pack%2Fopaque'));
+  assert.deepEqual(calls.map(c=>c.key),[null,null,null,'add-pack','remove-pack','acquire-pack','send-sticker']);
+  assert.deepEqual(calls[5].body,{packId:'pack/opaque'});
+  assert.ok(calls[6].url.pathname.endsWith('/sends'));
+  assert.equal(calls[6].body.source.stickerId,'chosen');
+  assert.throws(()=>client.stickerPacks('a',{membership:'added',cursor:'catalog-only'}),/cursor/);
+});
+
+test('contact privacy updates and request selections preserve initial request selections', async () => {
+  const privacy={chatsOnly:true,hideMyPosts:false,hideTheirPosts:true};
+  const calls=[];
+  const client=new NativeWeChatClient({...options,fetch:async(url,init)=>{
+    const path=new URL(url).pathname;
+    const method=init.method??'GET';
+    const body=init.body?JSON.parse(init.body):null;
+    calls.push({path,method,body,key:init.headers.get('Idempotency-Key')});
+    const action=method==='PATCH'?'update_privacy':path.endsWith('/accept')?'accept_request':'send_request';
+    return Response.json({id:'op',accountId:'a',kind:'contact_mutation',state:'queued',result:{action}});
+  }});
+  await client.updateContact('a','peer/exact',{privacy,expectedVersion:'current'},'privacy-key');
+  await client.sendContactRequest('a',{recipientRef:'opaque',message:'Hello',privacy},'send-key');
+  await client.acceptContactRequest('a','request',{expectedVersion:'request-version',privacy},'accept-key');
+  await client.acceptContactRequest('a','request','old-version','old-key');
+  assert.deepEqual(calls.map(c=>c.method),['PATCH','POST','POST','POST']);
+  assert.equal(calls[0].path,'/v1/accounts/a/contacts/peer%2Fexact');
+  assert.deepEqual(calls[0].body,{privacy,expectedVersion:'current'});
+  assert.deepEqual(calls[1].body,{recipientRef:'opaque',message:'Hello',privacy});
+  assert.deepEqual(calls[2].body,{expectedVersion:'request-version',privacy});
+  assert.deepEqual(calls[3].body,{expectedVersion:'old-version'});
+  assert.deepEqual(calls.map(c=>c.key),['privacy-key','send-key','accept-key','old-key']);
+});
+test('remark updates use the contact PATCH and expect a remark operation', async () => {
+  const calls=[];
+  const client=new NativeWeChatClient({...options,fetch:async(url,init)=>{
+    calls.push({path:new URL(url).pathname,method:init.method,body:JSON.parse(init.body),key:init.headers.get('Idempotency-Key')});
+    return Response.json({id:'op',accountId:'a',kind:'contact_mutation',state:'queued',result:{action:'update_remark'}});
+  }});
+  await client.updateContact('a','peer',{remark:'Monster',expectedVersion:'v'},'remark-key');
+  await client.updateContact('a','peer',{remark:null,expectedVersion:'v'},'clear-key');
+  assert.deepEqual(calls.map(c=>[c.method,c.path,c.body,c.key]),[
+    ['PATCH','/v1/accounts/a/contacts/peer',{remark:'Monster',expectedVersion:'v'},'remark-key'],
+    ['PATCH','/v1/accounts/a/contacts/peer',{remark:null,expectedVersion:'v'},'clear-key'],
+  ]);
+  // A privacy update must not accept a remark operation.
+  await assert.rejects(client.updateContact('a','peer',{privacy:{chatsOnly:false,hideMyPosts:false,hideTheirPosts:false},expectedVersion:'v'},'privacy-key'),/identity is invalid/);
+});
+test('privacy mutations reject foreign operations and never retry a lost reply', async () => {
+  const input={privacy:{chatsOnly:false,hideMyPosts:true,hideTheirPosts:false},expectedVersion:'v'};
+  for(const response of [{accountId:'other',kind:'contact_mutation',action:'update_privacy'}, {accountId:'a',kind:'group_mutation',action:'update_privacy'}, {accountId:'a',kind:'contact_mutation',action:'remove_contact'}]){
+    const client=new NativeWeChatClient({...options,fetch:async()=>Response.json({id:'op',state:'queued',...response,result:{action:response.action}})});
+    await assert.rejects(client.updateContact('a','peer',input,'key'),/identity/);
+  }
+  let attempts=0;
+  const client=new NativeWeChatClient({...options,fetch:async()=>{attempts++;throw Error('lost');}});
+  await assert.rejects(client.updateContact('a','peer',input,'same-key'),/lost/);
+  assert.equal(attempts,1);
+});
+
+test('contact list preserves explicit membership filters and pagination', async () => {
+  const queries=[];
+  const client=new NativeWeChatClient({...options, fetch: async url => {
+    queries.push(Object.fromEntries(new URL(url).searchParams));
+    return Response.json({items:[], nextCursor:null});
+  }});
+  await client.contacts('a');
+  await client.contacts('a',{relation:'all',cursor:'next',limit:2});
+  await client.contacts('a',{relation:'unknown',query:'person'});
+  assert.deepEqual(queries,[{}, {relation:'all',cursor:'next',limit:'2'}, {relation:'unknown',query:'person'}]);
 });
