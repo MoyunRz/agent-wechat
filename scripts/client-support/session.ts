@@ -20,6 +20,8 @@ import { t } from "./i18n.ts";
 import { messageSummary } from "./thread-preview.ts";
 import { canReply } from "./reply.ts";
 import { quotedText, quoteTargetMatches } from "./quote-preview.ts";
+import { ContactPrivacyCache } from "./contact-privacy-cache.ts";
+import { StickerJobError } from "./sticker-jobs.ts";
 
 export type Account = {
   id: string;
@@ -236,6 +238,7 @@ export async function inventory<T>(
 
 /** Each account activation and thread selection fences every late response. */
 export class HubSession {
+  readonly contactPrivacy: ContactPrivacyCache;
   private value = initial();
   private listeners = new Set<() => void>();
   private signOutListeners = new Set<(account: string) => void>();
@@ -329,6 +332,7 @@ export class HubSession {
     initialAccounts?: Account[],
   ) {
     this.client = client;
+    this.contactPrivacy = new ContactPrivacyCache(client);
     this.receipts = receipts;
     this.cache = cache;
     this.now = now;
@@ -378,6 +382,7 @@ export class HubSession {
   }
   async clearLocalCache(account = this.value.account): Promise<void> {
     if (!account) return;
+    if (account === this.value.account) this.contactPrivacy.reset(account);
     this.histories.clear(account);
     this.restored.clear();
     await this.cache?.clearAccount(account);
@@ -444,6 +449,7 @@ export class HubSession {
     this.threadGeneration++;
     this.stream?.abort();
     this.historyRequest?.abort();
+    this.contactPrivacy.reset(null);
     this.publish(initial());
     this.stopped = true;
     this.mediaListeners.clear();
@@ -481,6 +487,7 @@ export class HubSession {
     this.replayReady = false;
     this.restored.clear();
     this.cursor = "0";
+    this.contactPrivacy.reset(null);
     this.publish({
       ...initial(),
       accounts: this.value.accounts.map((item) =>
@@ -516,6 +523,7 @@ export class HubSession {
     this.historyValidatedAt = undefined;
     this.stream?.abort();
     const generation = ++this.generation;
+    this.contactPrivacy.reset(account);
     this.threadGeneration++;
     this.catalogRequest++;
     this.cursor = "0";
@@ -1083,6 +1091,12 @@ export class HubSession {
       this.interactionReads.delete(key);
     }
   }
+  private warmContactPrivacy(account: string) {
+    const own = this.value.accounts.find(item => item.id === account)?.ownUsername;
+    this.contactPrivacy.warm(account, this.value.contacts.filter(contact =>
+      contact.relation === "friend" && contact.id !== own && contact.id !== "filehelper",
+    ).map(contact => contact.id));
+  }
   private loadCatalog(account: string, generation: number): Promise<void> {
     if (
       this.catalogFlight?.account === account &&
@@ -1114,6 +1128,7 @@ export class HubSession {
           contacts: contacts.items,
           capabilities,
         });
+        this.warmContactPrivacy(account);
         this.persist();
       }
     })().finally(() => {
@@ -1358,6 +1373,19 @@ export class HubSession {
       this.signedOut(account, event.cursor);
       return;
     }
+    if ((event.kind === "contact.updated" || event.kind === "contacts.updated") && typeof event.data.contactId === "string") {
+      const id = event.data.contactId;
+      this.contactPrivacy.invalidate(account, id);
+      if (this.value.contacts.some(contact => contact.id === id && contact.relation === "friend")) {
+        this.contactPrivacy.warm(account, [id]);
+      }
+    }
+    const contactsMayHaveChanged = (event.kind === "metadata.changed" && event.data.kind === "contacts") ||
+      (event.kind === "projection.blocked" && event.data.stream === "contact");
+    if (contactsMayHaveChanged && !this.contactPrivacy.denied(account)) {
+      this.contactPrivacy.reset(account);
+      this.warmContactPrivacy(account);
+    }
     if (event.kind === "account.settings_updated")
       for (const listener of this.settingsListeners) listener(account);
     if (
@@ -1429,6 +1457,7 @@ export class HubSession {
     // Push hints and control diagnostics carry no conversation content.
   }
   private async recover(account: string, generation: number): Promise<void> {
+    this.contactPrivacy.reset(account);
     const boundary = await this.refresh(account, generation);
     if (!this.current(account, generation)) return;
     this.histories.clear(account);
@@ -1512,6 +1541,9 @@ export class HubSession {
         if (error instanceof NativeApiError && error.code === "auth_required") {
           this.signedOut(account);
           return;
+        }
+        if (error instanceof NativeApiError && [401, 403].includes(error.status)) {
+          this.contactPrivacy.reset(account, error);
         }
         this.publish({
           connected: false,

@@ -13,6 +13,10 @@ pub(super) fn routes() -> Router<App> {
             post(accept),
         )
         .api_route(
+            "/v1/accounts/{a}/contact-privacy/snapshots",
+            post(privacy_snapshots),
+        )
+        .api_route(
             "/v1/accounts/{a}/contacts/{id}",
             axum::routing::delete(remove),
         )
@@ -138,6 +142,69 @@ async fn delete(
     )
     .await
 }
+fn privacy_settings(
+    input: contracts::NativeContactPrivacySettings,
+) -> wechat_core::ContactPrivacySettings {
+    wechat_core::ContactPrivacySettings {
+        chats_only: input.chats_only,
+        hide_my_posts: input.hide_my_posts,
+        hide_their_posts: input.hide_their_posts,
+    }
+}
+async fn privacy(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path((a, id)): Path<(String, String)>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "admin")?;
+    let value = app
+        .core
+        .read(&a.clone(), move |core| core.contact_privacy(&a, &id))
+        .await?;
+    checked::<contracts::NativeContactPrivacy>(value)
+}
+async fn privacy_snapshots(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<contracts::NativeContactPrivacySnapshotQuery>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "admin")?;
+    let value = app
+        .core
+        .read(&a.clone(), move |core| {
+            core.contact_privacy_snapshots(&a, &input.ids)
+        })
+        .await?;
+    checked::<contracts::NativeContactPrivacySnapshots>(value)
+}
+async fn update_contact(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path((a, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(input): Json<contracts::NativeContactUpdate>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    c.require(Some(&a), "admin")?;
+    let operation = app
+        .core
+        .update_contact(
+            &a,
+            &id,
+            wechat_core::ContactUpdate {
+                privacy: privacy_settings(input.privacy),
+                expected_version: input.expected_version,
+            },
+            idempotency_key(&headers)?,
+        )
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        checked::<contracts::NativeOperation>(
+            serde_json::to_value(operation).map_err(anyhow::Error::from)?,
+        )?,
+    ))
+}
 async fn remove(
     State(app): State<App>,
     Extension(c): Extension<Claims>,
@@ -236,6 +303,46 @@ mod tests {
                     .unwrap();
                 assert_eq!(response.status(), status, "{method} {path}");
             }
+        }
+    }
+    #[tokio::test]
+    async fn privacy_read_requires_admin_on_the_selected_account() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        store.create_account("one").unwrap();
+        let read = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        store
+            .issue_token(
+                "reader",
+                &format!("{:x}", Sha256::digest(read.as_bytes())),
+                &["one".into()],
+                &["read".into()],
+                None,
+            )
+            .unwrap();
+        let app = crate::router(
+            Core::new(store, None).unwrap(),
+            "0123456789abcdef0123456789abcdef",
+        );
+        for (method, path, body) in [
+            ("GET", "contacts/peer/privacy", Body::empty()),
+            (
+                "POST",
+                "contact-privacy/snapshots",
+                Body::from(r#"{"ids":["peer"]}"#),
+            ),
+        ] {
+            let request = Request::builder()
+                .method(method)
+                .uri(format!("/v1/accounts/one/{path}"))
+                .header("authorization", format!("Bearer {read}"))
+                .header("content-type", "application/json")
+                .body(body)
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
         }
     }
 }

@@ -802,6 +802,12 @@ pub fn typescript() -> String {
         NativeGroupCreateRequest::decl(),
         NativeContactSearchRequest::decl(),
         NativeContactSearch::decl(),
+        NativeContactPrivacySettings::decl(),
+        NativeContactPrivacy::decl(),
+        NativeContactPrivacySnapshotQuery::decl(),
+        NativeContactPrivacySnapshots::decl(),
+        NativeContactUpdate::decl(),
+        NativeContactRequestAccept::decl(),
         NativeContactRequestSend::decl(),
         NativeContactRequestVersion::decl(),
         NativeContactRequestMessage::decl(),
@@ -1144,6 +1150,64 @@ pub struct NativeContactRequestSend {
     pub recipient_ref: String,
     /// Greeting supplied by the owner; no automatic default is inserted.
     pub message: String,
+    /// Initial relationship privacy; omission keeps the supported default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy: Option<NativeContactPrivacySettings>,
+}
+/// Relationship privacy selected by the account owner.
+#[derive(Clone, Debug, Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactPrivacySettings {
+    /// Restrict this relationship to chats.
+    pub chats_only: bool,
+    /// Hide this account's Moments posts from this person.
+    pub hide_my_posts: bool,
+    /// Hide this person's Moments posts from this account.
+    pub hide_their_posts: bool,
+}
+/// Current relationship privacy read from the supported official profile.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeContactPrivacy {
+    /// Current settings for this account's relationship.
+    pub privacy: NativeContactPrivacySettings,
+    /// Account/contact-bound version required when saving a change.
+    pub version: String,
+}
+/// Exact contacts to read from the local profile in one request.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactPrivacySnapshotQuery {
+    /// One to 200 exact contact IDs, at most 512 bytes per ID.
+    pub ids: Vec<String>,
+}
+/// Canonical saved privacy snapshots from a single profile read view.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeContactPrivacySnapshots {
+    /// Snapshots keyed by contact ID. Missing, unsupported, pending and unresolved contacts are omitted.
+    pub snapshots: std::collections::BTreeMap<String, NativeContactPrivacy>,
+}
+/// Update supported contact settings after inspecting their current version.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactUpdate {
+    /// Desired settings; unrelated contact flags are preserved.
+    pub privacy: NativeContactPrivacySettings,
+    /// Version returned by the privacy read on this account.
+    pub expected_version: String,
+}
+/// Accept the inspected request with optional initial relationship privacy.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeContactRequestAccept {
+    /// Current request version returned by get/list.
+    pub expected_version: String,
+    /// Initial relationship privacy; omission keeps the supported default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub privacy: Option<NativeContactPrivacySettings>,
 }
 /// Precondition for accepting or locally deleting the inspected request.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
