@@ -1,0 +1,404 @@
+/*
+ * Conversation sidebar: header actions, search field, filter tabs, the list
+ * with its aggregate rows and the empty/loading states. Ported from the Vue
+ * scoped style block with identical selectors and values.
+ */
+
+.thread-sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 284px;
+  min-width: 248px;
+  height: 100%;
+  border-right: 1px solid var(--border);
+  background: var(--sidebar-sheen), var(--panel);
+}
+
+.sidebar-header {
+  padding: 16px 14px 10px;
+}
+
+.sidebar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sidebar-title h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.thread-count {
+  color: var(--muted-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 12px 8px;
+  padding: 0 10px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-elevated);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.search-wrap:focus-within {
+  border-color: var(--accent);
+}
+
+.search-icon {
+  color: var(--muted-soft);
+  flex: 0 0 auto;
+}
+
+.search-wrap input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+}
+
+.search-wrap input::placeholder {
+  color: var(--muted-soft);
+}
+
+.clear-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel-hover);
+  color: var(--muted);
+}
+
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 10px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-tab {
+  flex: 0 0 auto;
+  padding: 4px 5px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.filter-tab:hover {
+  color: var(--text-soft);
+  background: var(--panel-hover);
+}
+
+.filter-tab.active {
+  color: var(--text);
+  background: var(--panel-hover);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.thread-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 6px 12px;
+}
+
+.thread-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.thread-item:hover {
+  background: var(--panel-hover);
+}
+
+.thread-item.active {
+  background: linear-gradient(135deg, var(--accent-soft), var(--accent-faint));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Mini program / service account aggregate entry: fixed brand icon plus the
+   summed unread count; clicking expands the nested list. */
+.category-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: #fff;
+}
+
+.category-avatar svg {
+  width: 58%;
+  height: 58%;
+  display: block;
+}
+
+.category-mini {
+  background: linear-gradient(135deg, #4795ff, #1a6ce0);
+  box-shadow: 0 6px 16px rgba(71, 149, 255, 0.24);
+}
+
+.category-service {
+  background: linear-gradient(135deg, #ffb14e, #f5760a);
+  box-shadow: 0 6px 16px rgba(245, 118, 10, 0.24);
+}
+
+.category-chevron {
+  color: var(--muted-soft);
+  transition: transform 0.18s ease;
+}
+
+.category-chevron.open {
+  transform: rotate(180deg);
+}
+
+.thread-item.nested {
+  padding-left: 22px;
+  background: color-mix(in srgb, var(--panel-soft) 55%, transparent);
+}
+
+.thread-item.nested:hover {
+  background: var(--panel-hover);
+}
+
+.thread-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.thread-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thread-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.thread-time {
+  flex: 0 0 auto;
+  color: var(--muted-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-preview-row {
+  align-items: center;
+}
+
+.thread-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.thread-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.muted-icon {
+  color: var(--muted-soft);
+}
+
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Muted conversations show the unread count in grey, like the official client. */
+.unread-badge.unread-muted {
+  background: var(--muted-soft);
+  color: var(--rail-bg, #1a212c);
+}
+
+.thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 46px 22px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.thread-empty p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.thread-empty span {
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 4px;
+  border-radius: 15px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.thread-skeletons {
+  padding: 4px;
+}
+
+.thread-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 4px;
+}
+
+.skeleton-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--panel-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.skeleton-line {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.w-60 { width: 60%; }
+.w-90 { width: 90%; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Mobile: the list spans the full width, and the search field starts at 16px
+   so iOS does not zoom in on focus. */
+@media (max-width: 768px) {
+  .thread-sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .sidebar-header {
+    padding: 12px 12px 8px;
+  }
+
+  .sidebar-title h2 {
+    font-size: 20px;
+  }
+
+  .search-wrap input {
+    font-size: 16px;
+  }
+}

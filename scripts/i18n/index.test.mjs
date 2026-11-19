@@ -10,13 +10,13 @@ const config = {
 };
 
 /** Runs the check over an in-memory tree: `{ path: text }`. */
-function run(tree) {
+function run(tree, active = config) {
   const read = path => {
     if (!(path in tree)) throw new Error(`no file ${path}`);
     return tree[path];
   };
   const list = (dir, extensions) => Object.keys(tree).filter(path => path.startsWith(`${dir}/`) && extensions.some(extension => path.endsWith(extension)));
-  return checkUi({ read, list, config }).map(({ file, key, message }) => `${file}${key ? `: ${key}` : ''}: ${message}`);
+  return checkUi({ read, list, config: active }).map(({ file, key, message }) => `${file}${key ? `: ${key}` : ''}: ${message}`);
 }
 
 const en = { app: { hello: 'Hello {{name}}', items_one: '{{count}} item', items_other: '{{count}} items' }, desktopShell: { trayOpen: 'Open' } };
@@ -71,6 +71,19 @@ test('desktop keys are read from the Rust text functions', () => {
   ]);
 });
 
+test('a catalog may allow keys no code uses', () => {
+  const desktopOnly = {
+    locales: 'locales',
+    code: [],
+    desktopCode: ['rs'],
+    registries: { 'src/i18n.ts': /tag: "([^"]+)"/g },
+    allowUnused: true,
+  };
+  const tree = { ...base, 'locales/zh-CN.json': '{}' };
+  assert.deepEqual(run(tree, { ...desktopOnly, allowUnused: false }), ['locales/en.json: app.hello: not used by any code', 'locales/en.json: app.items: not used by any code']);
+  assert.deepEqual(run(tree, desktopOnly), []);
+});
+
 test('helpers', () => {
   assert.deepEqual(flatten({ a: { b: 'x', c: { d: 'y' } } }), { 'a.b': 'x', 'a.c.d': 'y' });
   assert.equal(baseKey('a.items_other'), 'a.items');
@@ -102,10 +115,14 @@ test('a stale translation is exempt from placeholder checks; status reports it',
   assert.deepEqual(status.machine, ['app.items']);
   assert.deepEqual(status.missing, ['desktopShell.trayOpen']);
   // Stamping with no items leaves stale entries alone; naming the key records it.
-  const real = { 'packages/client-ui/locales/en.json': tree['locales/en.json'], 'packages/client-ui/locales/zh-CN.json': tree['locales/zh-CN.json'], 'packages/client-ui/locales/zh-CN.meta.json': tree['locales/zh-CN.meta.json'] };
+  const real = {
+    'wechat-ui/src/i18n/shell/en.json': tree['locales/en.json'],
+    'wechat-ui/src/i18n/shell/zh-CN.json': tree['locales/zh-CN.json'],
+    'wechat-ui/i18n/shell/zh-CN.meta.json': tree['locales/zh-CN.meta.json'],
+  };
   const written = {};
   const io = { read: path => real[path] ?? (() => { throw new Error(`no file ${path}`); })(), list: (dir, ext) => Object.keys(real).filter(p => p.startsWith(`${dir}/`) && ext.some(e => p.endsWith(e))), write: (path, text) => { written[path] = text; } };
   assert.deepEqual(await stampLanguage('zh-CN', {}, io), []);
   assert.deepEqual(await stampLanguage('zh-CN', { items: ['app.hello'] }, io), ['app.hello']);
-  assert.equal(JSON.parse(written['packages/client-ui/locales/zh-CN.meta.json'])['app.hello'].source, hash('Hello {{who}}'));
+  assert.equal(JSON.parse(written['wechat-ui/i18n/shell/zh-CN.meta.json'])['app.hello'].source, hash('Hello {{who}}'));
 });

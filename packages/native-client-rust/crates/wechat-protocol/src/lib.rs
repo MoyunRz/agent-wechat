@@ -97,6 +97,7 @@ pub mod mmtls;
 mod notice;
 pub mod openim;
 pub use openim::{OpenImContact, OpenImServiceError};
+pub(crate) mod resolve;
 pub mod verify_user;
 pub use verify_user::{VerifyUserAcceptReply, VerifyUserAcceptRequest};
 pub mod protobuf;

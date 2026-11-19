@@ -51,6 +51,12 @@ request MediaTransferRequest.messageId | string, required | ID of the message to
 request MediaTransferRequest.quality | string, values best|thumbnail|standard|original|normal|encoded, default best | Which copy to download. The default is `best`.
 request NativeAccountRemovalRequest | object, rejects unknown fields | Request to remove a signed-out account.
 request NativeAccountRemovalRequest.confirmAccountId | string, required | Must repeat the account ID from the URL, to confirm the removal.
+request NativeAiConfigRequest | object, rejects unknown fields | Request to store the daemon-wide AI assistant configuration. `apiKey` of null or an empty string keeps the previously stored key.
+request NativeAiConfigRequest.apiKey | string, nullable, default null | The provider API key. Omit or send empty to keep the stored key.
+request NativeAiConfigRequest.baseUrl | string, required | Base URL of an OpenAI-compatible provider, such as `https://api.openai.com/v1`.
+request NativeAiConfigRequest.model | string, required | The currently selected model identifier.
+request NativeAiConfigRequest.models | array of string, required | The selectable model identifiers.
+request NativeAiConfigRequest.reasoning | string, default  | Reasoning effort (`minimal`/`low`/`medium`/`high`) sent as `reasoning_effort`; empty means the parameter is not sent.
 request NativeContactAcceptRequest | object, rejects unknown fields | Request to accept one inbound contact request.
 request NativeContactAcceptRequest.encryptUsername | string, required | The request's `encryptusername`, copied exactly as the account received it.
 request NativeContactAcceptRequest.scene | integer, required, min 0, format uint32 | The request's scene value, copied exactly as the account received it.
@@ -758,6 +764,7 @@ route GET /health | scope none, response untyped | Report that the daemon is run
 route GET /v1/access-tokens | scope owner token, response untyped | List the API tokens that have been issued, without their secret values.
 route GET /v1/accounts | scope read, response untyped | List the accounts this token can read, with their connection status.
 route GET /v1/accounts/{a} | scope read, response untyped | Show one account and its connection status.
+route GET /v1/accounts/{a}/ai/config | scope read, response untyped | Show one WeChat account's AI assistant configuration. The API key is never returned; only whether one is configured.
 route GET /v1/accounts/{a}/avatars/{id} | scope media, response image/* | Get the cached avatar picture of a contact or group. It does not download a new one.
 route GET /v1/accounts/{a}/calls/current | scope calls, response CallSnapshot, sdk response CallSnapshot | Show whether the account is in a call, the incoming offer and the available call features.
 route GET /v1/accounts/{a}/calls/socket | scope calls, upgrade websocket, socket control | Open the call control WebSocket for commands and events. See calls-websocket.txt.
@@ -802,6 +809,8 @@ route PATCH /v1/accounts/{a}/groups/{id} | scope admin, idempotency key required
 route PATCH /v1/accounts/{a}/settings | scope media, request AccountSettings, response AccountSettings, sdk request AccountSettings, sdk response AccountSettings | Replace the account settings, such as the largest file to download automatically.
 route POST /v1/access-tokens | scope owner token, request TokenRequest, response untyped | Create an API token limited to chosen accounts and scopes. The secret token value is returned only in this response.
 route POST /v1/accounts | scope admin, request CreateAccountRequest, response untyped, status 201 | Register a new account, optionally with an ID and alias. The token must cover every account.
+route POST /v1/accounts/{a}/ai/chat/completions | scope send, request untyped, response untyped | Forward an OpenAI-compatible chat completion request to the account's configured provider with the stored API key. Streaming responses are passed through as they arrive.
+route POST /v1/accounts/{a}/ai/models | scope read, response untyped | Fetch the model catalogue from the account's configured OpenAI-compatible provider and return the sorted model identifiers.
 route POST /v1/accounts/{a}/auth/disconnect | scope login, response untyped | Close the connection to WeChat but keep the saved login trust.
 route POST /v1/accounts/{a}/auth/login | scope login, idempotency key optional, request LoginRequest, response NativeOperation, status 202, sdk request LoginRequest, sdk response NativeOperation | Start signing the account in with a saved device or a QR code. Poll the returned operation.
 route POST /v1/accounts/{a}/auth/logout-local | scope login, response untyped | Sign the account out on this daemon only, without asking WeChat to revoke the login.
@@ -842,8 +851,10 @@ route POST /v1/accounts/{a}/sync | scope login, response untyped, sdk response N
 route POST /v1/accounts/{a}/threads/{thread}/read-state | scope read-state, request NativeReadRequest, response untyped | Mark a chat as read when its read-state version still matches the one in the body.
 route POST /v1/accounts/{a}/uploads | scope send, request multipart, response untyped, status 201, sdk response OwnedMediaSource | Stage the bytes of one file as a media source that a later send can use.
 route POST /v1/daemon/shutdown | scope owner token, request untyped, response untyped | Stop the daemon. The body repeats the process ID, server ID and ownership generation from the status route, so a stale caller cannot stop a newer daemon.
+route POST /v1/login-attempts | scope login, idempotency key optional, request LoginRequest, response NativeOperation, status 202, sdk request LoginRequest, sdk response NativeOperation | Start signing in without choosing an account. The daemon routes the login to the matching account on success; poll the returned operation with that account.
 route POST /v1/profiles/official | scope admin, request OfficialProfileRequest, response OfficialProfileSelection, sdk request OfficialProfileRequest, sdk response OfficialProfileSelection | Find and attach an official WeChat profile on the daemon host as a new account. The token must cover every account.
 route POST /v1/tokens | scope owner token, request TokenRequest, response untyped | Create an API token limited to chosen accounts and scopes. The secret token value is returned only in this response.
+route PUT /v1/accounts/{a}/ai/config | scope admin, request NativeAiConfigRequest, response untyped | Store one WeChat account's AI assistant configuration: an OpenAI-compatible base URL, the provider API key and the selectable models. An empty or omitted apiKey keeps the stored key.
 route PUT /v1/accounts/{a}/groups/{id}/my-name | scope admin, idempotency key required, request NativeGroupMyNameRequest, response NativeOperation, status 202, sdk response NativeOperation | Set your own display name in a group.
 route PUT /v1/accounts/{a}/openclaw-config | scope admin, request NativeOpenClawConfigRequest, response untyped | Store or clear one account's OpenClaw configuration document. Each WeChat account keeps its own copy, so different users configure different OpenClaw policies.
 route PUT /v1/accounts/{a}/threads/{id}/notifications | scope admin, idempotency key required, request NativeThreadNotificationsRequest, response NativeOperation, status 202, sdk response NativeOperation | Mute or unmute notifications for a chat.

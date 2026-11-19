@@ -160,10 +160,11 @@ Rust 编写的 Daemon 负责账号、同步和媒体处理。各客户端共享�
 
 ```bash
 pnpm install --frozen-lockfile
+npm --prefix wechat-ui ci
 pnpm client:dev
 ```
 
-前置条件与场景控制，请参阅[客户端预览指南](packages/client-ui/README.md)和[模拟器指南](packages/native-client-rust/crates/wechat-simulator/README.md)。如需构建并测试改动，请先阅读 [AGENTS.md](AGENTS.md) 和[构建指南](https://thisnick.github.io/agent-wechat/zh-cn/reference/build/)。
+[wechat-ui](wechat-ui/README.md) 中的这套 React 聊天界面同时用于桌面应用和 Daemon 的 `/ui/` 页面。场景控制请参阅[模拟器指南](packages/native-client-rust/crates/wechat-simulator/README.md)。如需构建并测试改动，请先阅读 [AGENTS.md](AGENTS.md) 和[构建指南](https://thisnick.github.io/agent-wechat/zh-cn/reference/build/)。
 
 [演示素材与画廊源码](scripts/demo-gallery/README.md)包含成片视频、截图、合成的视觉测试素材和图片生成脚本。[视频剪辑源码](scripts/demo-video/README.md)保留了动态标题、时间轴和原创配乐；私有的原始录屏不纳入 Git 仓库。
 

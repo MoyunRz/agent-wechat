@@ -2731,6 +2731,7 @@ fn classify_error(error: &anyhow::Error) -> String {
         || message.contains("connection")
         || message.contains("fetch_failed")
         || message.contains("dns_failed")
+        || message.contains("resolve_fallback_failed")
         || message.contains("error sending request")
         || message.contains("incomplete message")
         || message.contains("unexpected end of file")

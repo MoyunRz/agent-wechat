@@ -2,7 +2,7 @@
 use anyhow::{ensure, Result};
 use std::{
     io::Read,
-    net::{IpAddr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, SocketAddr},
     time::Duration,
 };
 pub const MAX_LINK_THUMBNAIL_BYTES: usize = 8 * 1024 * 1024;
@@ -64,10 +64,7 @@ pub(crate) fn public_address(
     let port = url
         .port_or_known_default()
         .ok_or_else(|| anyhow::anyhow!(dns_failed))?;
-    let addresses = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|_| anyhow::anyhow!(dns_failed))?
-        .collect::<Vec<_>>();
+    let addresses = crate::resolve::resolve(&host, port)?;
     ensure!(
         !addresses.is_empty()
             && addresses.len() <= 64

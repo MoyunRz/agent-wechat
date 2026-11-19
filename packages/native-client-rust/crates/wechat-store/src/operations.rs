@@ -455,12 +455,34 @@ impl Store {
     pub fn save_operation(&self, op: &Operation) -> Result<()> {
         self.control(&op.account_id,|db|{
             let tx=db.transaction()?;
-            let changed=tx.execute("INSERT INTO operations VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET state=excluded.state,result_json=excluded.result_json,updated_at=excluded.updated_at WHERE operations.state NOT IN ('cancelled','succeeded','failed','expired','rejected','needs_login','needs_review') OR operations.state=excluded.state",params![op.id,op.kind,op.state,serde_json::to_string(&op.result)?,op.created_at,op.updated_at])?;
+            let changed=tx.execute("INSERT INTO operations VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET state=excluded.state,result_json=excluded.result_json,updated_at=excluded.updated_at WHERE operations.state NOT IN ('cancelled','succeeded','failed','expired','rejected','needs_login','needs_slot_login','needs_review') OR operations.state=excluded.state",params![op.id,op.kind,op.state,serde_json::to_string(&op.result)?,op.created_at,op.updated_at])?;
             if changed==1 {
                 tx.execute("INSERT INTO events(kind,data_json,created_at)VALUES('operation.updated',?1,?2)",params![serde_json::to_string(&serde_json::json!({"id":op.id,"state":op.state,"kind":op.kind}))?,op.updated_at])?;
                 let seq=tx.last_insert_rowid();tx.execute("DELETE FROM events WHERE sequence<=?1",[seq.saturating_sub(10_000)])?;
             }
             tx.commit()?;Ok(())
+        })
+    }
+    /// Newest login operation state for an account, with whether it has gone
+    /// quiet for fifteen minutes. Used to decide whether a throwaway
+    /// unbound-login slot is still in flight or safe to reap.
+    pub fn latest_login_op(&self, account: &str) -> Result<Option<(String, bool)>> {
+        self.control(account, |db| {
+            let row = db
+                .query_row(
+                    "SELECT state, updated_at FROM operations WHERE kind='login' ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            let now = chrono::Utc::now();
+            Ok(row.map(|(state, updated_at)| {
+                // An unparsable stamp must never make a live attempt look stale.
+                let stale = chrono::DateTime::parse_from_rfc3339(&updated_at)
+                    .map(|at| now.signed_duration_since(at) > chrono::Duration::minutes(15))
+                    .unwrap_or(false);
+                (state, stale)
+            }))
         })
     }
     pub fn operation(&self, account: &str, id: &str) -> Result<Operation> {
@@ -475,7 +497,7 @@ impl Store {
         self.control(account, |db| {
             let tx = db.transaction()?;
             let rows = {
-                let mut query = tx.prepare("SELECT id,kind FROM operations WHERE kind IN ('login','metadata','sync','media-writeback') AND state NOT IN ('cancelled','succeeded','failed','expired','rejected','needs_login','needs_review')")?;
+                let mut query = tx.prepare("SELECT id,kind FROM operations WHERE kind IN ('login','metadata','sync','media-writeback') AND state NOT IN ('cancelled','succeeded','failed','expired','rejected','needs_login','needs_slot_login','needs_review')")?;
                 let rows = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
             };

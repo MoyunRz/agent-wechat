@@ -247,6 +247,122 @@ impl Store {
         };
         Ok(updated_at)
     }
+
+    /// One WeChat account's AI assistant configuration: an OpenAI-compatible
+    /// endpoint, its key and the selectable models. Each account keeps its own
+    /// copy, so different users configure different providers. Never expose
+    /// the API key through read APIs; callers only learn whether one exists.
+    pub fn ai_config(&self, account: &str) -> Result<Option<AiConfig>> {
+        self.account(account)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
+        use rusqlite::OptionalExtension;
+        let row: Option<(String, String, String, String, String, i64)> = db
+            .query_row(
+                "SELECT base_url,api_key,models,model,reasoning,updated_at FROM ai_config WHERE account_id=?1",
+                params![account],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(row.map(
+            |(base_url, api_key, models, model, reasoning, updated_at)| AiConfig {
+                models: serde_json::from_str(&models).unwrap_or_default(),
+                base_url,
+                api_key,
+                model,
+                reasoning,
+                updated_at,
+            },
+        ))
+    }
+
+    /// Store one account's AI configuration. `api_key` of `None` keeps the
+    /// stored key so the UI can update the rest without resending the secret.
+    pub fn set_ai_config(
+        &self,
+        account: &str,
+        base_url: &str,
+        api_key: Option<&str>,
+        models: &[String],
+        model: &str,
+        reasoning: &str,
+    ) -> Result<i64> {
+        let base = base_url.trim();
+        let valid = (base.starts_with("http://") || base.starts_with("https://"))
+            && base.len() > 8
+            && base.len() <= 2048
+            && !base.contains(char::is_whitespace);
+        if !valid {
+            bail!("invalid_ai_base_url");
+        }
+        for model in models {
+            if model.is_empty() || model.len() > 200 {
+                bail!("invalid_ai_model");
+            }
+        }
+        if let Some(key) = api_key {
+            if key.len() > 4096 {
+                bail!("invalid_ai_api_key");
+            }
+        }
+        // OpenAI-compatible reasoning effort; empty means never send it.
+        if !matches!(reasoning, "" | "minimal" | "low" | "medium" | "high") {
+            bail!("invalid_ai_reasoning");
+        }
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or_default();
+        self.account(account)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("registry lock poisoned"))?;
+        db.execute(
+            "INSERT INTO ai_config(account_id,base_url,api_key,models,model,reasoning,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7)
+             ON CONFLICT(account_id) DO UPDATE SET
+               base_url=excluded.base_url,
+               api_key=CASE WHEN excluded.api_key='' THEN ai_config.api_key ELSE excluded.api_key END,
+               models=excluded.models,
+               model=excluded.model,
+               reasoning=excluded.reasoning,
+               updated_at=excluded.updated_at",
+            params![
+                account,
+                base_url,
+                api_key.unwrap_or_default(),
+                serde_json::to_string(models)?,
+                model,
+                reasoning,
+                updated_at
+            ],
+        )?;
+        Ok(updated_at)
+    }
+}
+
+/// One WeChat account's AI assistant configuration stored in the registry.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub models: Vec<String>,
+    pub model: String,
+    /// Reasoning effort sent as `reasoning_effort`; empty means never send it.
+    pub reasoning: String,
+    pub updated_at: i64,
 }
 #[cfg(test)]
 mod tests {
@@ -307,6 +423,70 @@ mod tests {
         store
             .set_openclaw_config("a", Some(&serde_json::json!({"dmPolicy":"open"})))
             .unwrap();
+    }
+
+    #[test]
+    fn ai_config_is_per_account_persisted_and_keeps_the_key_when_omitted() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(&temp.path().join("data")).unwrap();
+        store.create_account("a").unwrap();
+        store.create_account("b").unwrap();
+        assert!(store.ai_config("a").unwrap().is_none());
+        store
+            .set_ai_config(
+                "a",
+                "https://api.example.com/v1/",
+                Some("secret-key"),
+                &["model-b".into(), "model-a".into()],
+                "model-a",
+                "medium",
+            )
+            .unwrap();
+        let stored = store.ai_config("a").unwrap().unwrap();
+        assert_eq!(stored.base_url, "https://api.example.com/v1/");
+        assert_eq!(stored.api_key, "secret-key");
+        assert_eq!(
+            stored.models,
+            vec!["model-b".to_string(), "model-a".to_string()]
+        );
+        assert_eq!(stored.model, "model-a");
+        assert_eq!(stored.reasoning, "medium");
+        // Each account keeps its own copy.
+        assert!(store.ai_config("b").unwrap().is_none());
+        // Updating without a key keeps the stored secret; an empty base URL or
+        // a non-HTTP scheme is refused.
+        store
+            .set_ai_config(
+                "a",
+                "https://api.example.com/v2",
+                None,
+                &["model-a".into()],
+                "model-a",
+                "",
+            )
+            .unwrap();
+        let updated = store.ai_config("a").unwrap().unwrap();
+        assert_eq!(updated.base_url, "https://api.example.com/v2");
+        assert_eq!(updated.api_key, "secret-key");
+        assert_eq!(updated.reasoning, "");
+        assert!(store
+            .set_ai_config("a", "ftp://bad.example.com", None, &[], "", "")
+            .is_err());
+        assert!(store
+            .set_ai_config("a", "https://api.example.com", None, &[], "", "bogus")
+            .is_err());
+        store
+            .set_ai_config(
+                "b",
+                "https://other.example.com/v1",
+                Some("other-key"),
+                &["model-c".into()],
+                "model-c",
+                "low",
+            )
+            .unwrap();
+        assert_eq!(store.ai_config("b").unwrap().unwrap().api_key, "other-key");
+        assert_eq!(store.ai_config("a").unwrap().unwrap().api_key, "secret-key");
     }
 
     #[test]

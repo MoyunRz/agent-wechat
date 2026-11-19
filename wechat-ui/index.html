@@ -3,21 +3,12 @@
   <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/svg+xml" href="./src/assets/agent-wechat-logo.svg">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="color-scheme" content="dark light">
     <title>微信</title>
-    <script>
-      // 在 Vue 挂载前恢复主题，避免刷新时先闪一下深色。
-      try {
-        const raw = localStorage.getItem('vane.wechat.ui-settings')
-        if (raw && JSON.parse(raw).themeMode === 'light')
-          document.documentElement.classList.add('theme-light')
-      }
-      catch {}
-    </script>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -128,7 +128,7 @@ export async function interfaceAcceptance({
           : "text/javascript",
       );
       return res.end(
-        await readFile(new URL("../../client-ui/dist" + file, import.meta.url)),
+        await readFile(new URL("../../../wechat-ui/dist" + file, import.meta.url)),
       );
     }
     res.setHeader("Content-Type", "application/json");

@@ -6,7 +6,8 @@ migration registry/V003__removed_accounts.sql | sha256 8e4f0d619535bf4d | -
 migration registry/V004__media_download_settings.sql | sha256 aa9714c11e955b72 | -
 migration registry/V005__proactive_cache_settings.sql | sha256 048078f2834437c1 | -
 migration registry/V006__openclaw_configs.sql | sha256 aa4dba7ca41179a6 | -
-schema version | 6 | -
+migration registry/V007__ai_config.sql | sha256 804c89425f5f6bd5 | -
+schema version | 7 | -
 table access_tokens | CREATE TABLE access_tokens(id TEXT PRIMARY KEY,name TEXT NOT NULL,digest TEXT NOT NULL,accounts_json TEXT NOT NULL,scopes_json TEXT NOT NULL,expires_at INTEGER,revoked INTEGER NOT NULL DEFAULT 0) | -
 table access_tokens.accounts_json | TEXT, not null | -
 table access_tokens.digest | TEXT, not null | -
@@ -28,6 +29,15 @@ table accounts.profile_path | TEXT, not null | -
 table accounts.removed_at | INTEGER | -
 table accounts.schema_compatibility | TEXT, not null | -
 table accounts.storage_mode | TEXT, not null | -
+table ai_config | CREATE TABLE ai_config( account_id TEXT PRIMARY KEY REFERENCES accounts(id), base_url TEXT NOT NULL, api_key TEXT NOT NULL, models TEXT NOT NULL, model TEXT NOT NULL, reasoning TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL ) | -
+table ai_config.account_id | TEXT, primary key 1 | -
+table ai_config.account_id foreign key #0 | references accounts(id), on delete NO ACTION | -
+table ai_config.api_key | TEXT, not null | -
+table ai_config.base_url | TEXT, not null | -
+table ai_config.model | TEXT, not null | -
+table ai_config.models | TEXT, not null | -
+table ai_config.reasoning | TEXT, not null, default '' | -
+table ai_config.updated_at | INTEGER, not null | -
 table metadata | CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL) | -
 table metadata.key | TEXT, primary key 1 | -
 table metadata.value | TEXT, not null | -

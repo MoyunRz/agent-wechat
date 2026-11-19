@@ -27,7 +27,7 @@ impl Store {
         if signed_in {
             bail!("account_sign_out_required");
         }
-        let pending: bool = control.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE state NOT IN ('succeeded','failed','cancelled','rejected','expired','needs_login','needs_review')) OR EXISTS(SELECT 1 FROM runtime WHERE key='logout-pending') OR EXISTS(SELECT 1 FROM media_jobs WHERE state IN ('queued','running')) OR EXISTS(SELECT 1 FROM outbox WHERE state IN ('queued','submitting')) OR EXISTS(SELECT 1 FROM call_sessions WHERE state!='ended')", [], |r| r.get(0))?;
+        let pending: bool = control.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE state NOT IN ('succeeded','failed','cancelled','rejected','expired','needs_login','needs_slot_login','needs_review')) OR EXISTS(SELECT 1 FROM runtime WHERE key='logout-pending') OR EXISTS(SELECT 1 FROM media_jobs WHERE state IN ('queued','running')) OR EXISTS(SELECT 1 FROM outbox WHERE state IN ('queued','submitting')) OR EXISTS(SELECT 1 FROM call_sessions WHERE state!='ended')", [], |r| r.get(0))?;
         if pending {
             bail!("operation_in_progress");
         }

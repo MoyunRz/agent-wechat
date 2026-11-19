@@ -29,6 +29,7 @@ wechat-calls = { path = "../wechat-calls" }
 wechat-profile = { path = "../wechat-profile" }
 futures-util = "0.3"
 async-stream = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 ts-rs = { version = "10", features = ["no-serde-warnings"] }
 
 [dev-dependencies]

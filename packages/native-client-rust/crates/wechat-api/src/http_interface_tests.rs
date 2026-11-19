@@ -88,6 +88,7 @@ payloads! {
     "NativeContactGateRequest" => crate::contracts::NativeContactGateRequest,
     "NativeOfflineModeRequest" => crate::contracts::NativeOfflineModeRequest,
     "NativeOpenClawConfigRequest" => crate::contracts::NativeOpenClawConfigRequest,
+    "NativeAiConfigRequest" => crate::contracts::NativeAiConfigRequest,
     "NativeForgetRequest" => crate::contracts::NativeForgetRequest,
     "NativeTextSendRequest" => crate::contracts::NativeTextSendRequest,
     "NativeSendIntent" => crate::contracts::NativeSendIntent,
@@ -452,6 +453,10 @@ const TAGS: &[(&str, &str)] = &[
         "Accounts, their settings and background operations.",
     ),
     ("auth", "Signing in, connecting and signing out."),
+    (
+        "ai",
+        "The daemon-wide AI assistant: configuration and OpenAI-compatible chat forwarding.",
+    ),
     (
         "calls",
         "Voice calls. The two sockets are described in asyncapi.json.",

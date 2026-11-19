@@ -1,0 +1,97 @@
+/* Voice bubble styles, ported from the Vue scoped block. */
+.voice-player {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+  color: inherit;
+}
+
+.voice-trigger {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.voice-trigger:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.voice-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.voice-icon {
+  flex: 0 0 auto;
+}
+
+.voice-wave {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  min-width: 112px;
+  height: 26px;
+  padding: 0 1px;
+}
+
+.voice-bar {
+  flex: 0 0 auto;
+  width: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.34;
+  transition: opacity 0.12s linear;
+}
+
+.voice-bar.played {
+  opacity: 0.92;
+}
+
+.voice-player.unavailable .voice-bar {
+  opacity: 0.22;
+}
+
+.voice-playhead {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 26px;
+  border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+  transform: translate(-50%, -50%);
+  transition: left 0.08s linear;
+  pointer-events: none;
+}
+
+.voice-duration {
+  flex: 0 0 auto;
+  margin-left: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0.92;
+}
+
+.voice-audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}

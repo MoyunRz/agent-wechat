@@ -1,0 +1,200 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0e13;
+  --panel: #0f131a;
+  --panel-elevated: #121822;
+  --panel-soft: #171d28;
+  --panel-hover: #1c2430;
+  --panel-glass: rgba(15, 19, 26, 0.82);
+  --popover-bg: rgba(18, 24, 34, 0.98);
+  --rail-bg: #080b10;
+  --sidebar-sheen: linear-gradient(180deg, rgba(23, 29, 40, 0.5), transparent 26%);
+  --border: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(148, 163, 184, 0.24);
+  --text: #e8edf5;
+  --text-soft: #c3ccd9;
+  --muted: #8794a7;
+  --muted-soft: #667387;
+  --accent: #2f7cf6;
+  --accent-strong: #1f6feb;
+  --accent-soft: rgba(47, 124, 246, 0.16);
+  --accent-faint: rgba(47, 124, 246, 0.06);
+  --bubble-in: #1a212c;
+  --bubble-in-bg: linear-gradient(180deg, #1d2532, #1a212c);
+  --bubble-out: linear-gradient(135deg, #2f7cf6, #245fdc);
+  --bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --media-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  --bubble-meta: rgba(232, 237, 245, 0.55);
+  --bubble-in-text: #e8edf5;
+  --bubble-in-meta: rgba(232, 237, 245, 0.55);
+  --bubble-in-surface: rgba(255, 255, 255, 0.08);
+  --bubble-in-surface-strong: rgba(255, 255, 255, 0.14);
+  --bubble-out-text: #ffffff;
+  --bubble-out-meta: rgba(255, 255, 255, 0.72);
+  --bubble-out-surface: rgba(255, 255, 255, 0.1);
+  --bubble-out-surface-strong: rgba(255, 255, 255, 0.16);
+  --bubble-out-danger: #fecaca;
+  --bubble-out-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 24%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --surface-muted: rgba(255, 255, 255, 0.08);
+  --surface-muted-strong: rgba(255, 255, 255, 0.14);
+  --bubble-font-size: 13.5px;
+  --success: #34d399;
+  --success-text: #86efac;
+  --warning: #fbbf24;
+  --warning-text: #fde68a;
+  --danger: #f87171;
+  --danger-text: #fecaca;
+  --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.45);
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+}
+
+:root.theme-light {
+  color-scheme: light;
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-elevated: #ffffff;
+  --panel-soft: #f1f4f9;
+  --panel-hover: #e7ecf4;
+  --panel-glass: rgba(255, 255, 255, 0.86);
+  --popover-bg: rgba(255, 255, 255, 0.99);
+  --rail-bg: #ffffff;
+  --sidebar-sheen: linear-gradient(180deg, rgba(15, 23, 42, 0.03), transparent 26%);
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --text: #0f172a;
+  --text-soft: #334155;
+  --muted: #64748b;
+  --muted-soft: #94a3b8;
+  --bubble-in: #ffffff;
+  --bubble-in-bg: linear-gradient(180deg, #ffffff, #fbfcfe);
+  --bubble-shadow: 0 0 0 1px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --media-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+  --bubble-meta: rgba(51, 65, 85, 0.62);
+  --bubble-in-text: #0f172a;
+  --bubble-in-meta: rgba(51, 65, 85, 0.62);
+  --bubble-in-surface: rgba(15, 23, 42, 0.05);
+  --bubble-in-surface-strong: rgba(15, 23, 42, 0.09);
+  --surface-muted: rgba(15, 23, 42, 0.05);
+  --surface-muted-strong: rgba(15, 23, 42, 0.09);
+  --success-text: #15803d;
+  --warning-text: #b45309;
+  --danger-text: #b91c1c;
+  --shadow-lg: 0 24px 70px rgba(15, 23, 42, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fade-in {
+  animation: fade-in 0.22s ease both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 图片放大预览遮罩：点击图片打开，点击遮罩/Esc 关闭。 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: rgba(6, 10, 16, 0.82);
+  backdrop-filter: blur(6px);
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: min(92vw, 1100px);
+  max-height: 92vh;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+}

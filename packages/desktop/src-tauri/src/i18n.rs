@@ -6,12 +6,12 @@
 use serde_json::Value;
 use std::sync::{OnceLock, RwLock};
 
-/// Shipped catalogs. Keep in step with `languages` in `client-ui/src/i18n.ts`.
+/// Shipped catalogs. Keep in step with the language list in `wechat-ui/src/i18n/index.ts`.
 const CATALOGS: &[(&str, &str)] = &[
-    ("en", include_str!("../../../client-ui/locales/en.json")),
+    ("en", include_str!("../../../../wechat-ui/src/i18n/shell/en.json")),
     (
         "zh-CN",
-        include_str!("../../../client-ui/locales/zh-CN.json"),
+        include_str!("../../../../wechat-ui/src/i18n/shell/zh-CN.json"),
     ),
 ];
 

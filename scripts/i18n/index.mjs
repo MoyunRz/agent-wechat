@@ -5,20 +5,26 @@
 //   pnpm i18n check                             fail on English-side errors and broken translations
 //   pnpm i18n stamp <lang> [--machine] [items]  record that translations match the current English
 //
-// English is the source: packages/client-ui/locales/en.json for the UI and the pages in
-// docs/src/content/docs/ for the docs. A translation may be incomplete: a missing key
-// or page shows English, so missing never fails. What fails: code using a key English
-// lacks, English keys no code uses, and a translation that would render wrongly (bad
-// JSON, unknown keys, placeholders that differ from English, missing plural forms,
-// empty text, docs pages whose code, components, links or anchors differ from English).
+// English is the source: wechat-ui/src/i18n/shell/en.json for the desktop shell text
+// and the pages in docs/src/content/docs/ for the docs. The React chat interface
+// translates Chinese source strings with its own catalogue under
+// wechat-ui/src/i18n/dict/, which this checker does not manage.
 //
-// Each UI translation has a <lang>.meta.json recording, per key, a hash of the English
-// it was translated from (`source`) and, when a machine wrote it, a hash of what it
-// wrote (`machine`). A docs page records `sourceHash` in its frontmatter. When the
-// English changes, the translation is stale: reported, exempt from placeholder checks,
-// and due for an update. A machine translation a person has since edited counts as
-// the person's. `stamp` updates the records: with no items, only unrecorded ones;
-// name keys or pages to confirm stale translations are still right.
+// A translation may be incomplete: a missing key or page shows English, so missing
+// never fails. What fails: code using a key English lacks, a translation that would
+// render wrongly (bad JSON, unknown keys, placeholders that differ from English,
+// missing plural forms, empty text, docs pages whose code, components, links or
+// anchors differ from English). The shell catalogs may also carry old interface keys
+// that no code uses any more; those are allowed.
+//
+// Each shell translation has a <lang>.meta.json recording, per key, a hash of the
+// English it was translated from (`source`) and, when a machine wrote it, a hash of
+// what it wrote (`machine`). Its metadata lives outside `wechat-ui/src` so the UI
+// build never sees it. A docs page records `sourceHash` in its frontmatter. When the
+// English changes, the translation is stale: reported, exempt from placeholder
+// checks, and due for an update. A machine translation a person has since edited
+// counts as the person's. `stamp` updates the records: with no items, only
+// unrecorded ones; name keys or pages to confirm stale translations are still right.
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,16 +32,23 @@ import { compareDocs, docs, frontmatter, hash, stamp as stampPage } from './docs
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** Where the UI catalogs and the code that reads them live, relative to the repository root. */
+/**
+ * Where the desktop shell catalogs, their bookkeeping and the code that reads them
+ * live, relative to the repository root. The chat interface's own English catalogue
+ * is maintained with its code and is not checked here.
+ */
 export const ui = {
-  locales: 'packages/client-ui/locales',
-  code: ['packages/client-ui/src'],
-  // The desktop app reads `desktopShell.*` keys from the same catalogs.
+  locales: 'wechat-ui/src/i18n/shell',
+  // Kept outside wechat-ui/src so the UI build never packages translation metadata.
+  meta: 'wechat-ui/i18n/shell',
+  // The React interface no longer reads these key-based catalogs; the desktop app does.
+  code: [],
   desktopCode: ['packages/desktop/src-tauri/src'],
   registries: {
-    'packages/client-ui/src/i18n.ts': /tag: "([^"]+)"/g,
     'packages/desktop/src-tauri/src/i18n.rs': /\(\s*"([^"]+)",\s*include_str!/g,
   },
+  // The catalogs keep their old interface keys, so unused keys are expected.
+  allowUnused: true,
 };
 
 const pluralSuffix = /_(zero|one|two|few|many|other)$/;
@@ -134,7 +147,7 @@ export function loadUi({ read, list, config = ui }) {
       continue;
     }
     if (tag === 'en') continue;
-    const metaFile = `${config.locales}/${tag}.meta.json`;
+    const metaFile = `${config.meta ?? config.locales}/${tag}.meta.json`;
     try {
       metas[tag] = JSON.parse(read(metaFile));
     } catch (error) {
@@ -175,7 +188,7 @@ export function checkUi({ read, list, config = ui }) {
     }
   }
   for (const key of enBases) {
-    if (!used.has(key)) problems.push({ file: `${config.locales}/en.json`, key, message: 'not used by any code' });
+    if (!used.has(key) && !config.allowUnused) problems.push({ file: `${config.locales}/en.json`, key, message: 'not used by any code' });
   }
   for (const [key, value] of Object.entries(en)) {
     if (typeof value !== 'string' || !value.trim()) problems.push({ file: `${config.locales}/en.json`, key, message: 'English text is empty' });
@@ -351,7 +364,7 @@ export async function stampLanguage(tag, { machine = false, items = [] } = {}, {
     const sorted = Object.fromEntries(Object.keys(meta).sort().map(key => [key, meta[key]]));
     // One line per key keeps diffs readable.
     const lines = Object.entries(sorted).map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)}`);
-    write(`${ui.locales}/${tag}.meta.json`, `{\n${lines.join(',\n')}\n}\n`);
+    write(`${ui.meta ?? ui.locales}/${tag}.meta.json`, `{\n${lines.join(',\n')}\n}\n`);
   }
   const folders = await docsLocaleMap();
   const folder = Object.keys(folders).find(name => folders[name] === tag);

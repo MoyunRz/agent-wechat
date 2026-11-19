@@ -324,6 +324,60 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
         .context("account worker stopped")?
 }
 
+fn login_request_hash(request: &LoginRequest) -> Result<String> {
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(request)?)
+    ))
+}
+
+/// Prefix for throwaway accounts created by unbound logins. These accounts
+/// hold at most one in-flight QR attempt; a completed login is adopted into
+/// its real account (or keeps the slot, renamed to the WeChat identity) and
+/// the UI releases the leftover afterwards.
+const PENDING_LOGIN_PREFIX: &str = "pending-login-";
+/// Cap on concurrent unbound login attempts; stale ones are reaped first.
+const MAX_PENDING_LOGINS: usize = 3;
+
+fn valid_pending_alias(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Pure WeChat identity comparison used when routing a completed unbound
+/// login to its account. Unit-tested below.
+fn identity_matches(prior_uin: u32, prior_username: &str, uin: u32, username: &str) -> bool {
+    prior_uin == uin && prior_username == username
+}
+
+/// One account slot's saved WeChat identity, read without writing anything.
+/// Slots with no readable identity are left out of the candidate list.
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct SlotIdentity {
+    account_id: String,
+    uin: u32,
+    username: String,
+}
+
+/// Pure adoption decision for a completed login: the slot that already holds
+/// the scanned identity, if any. The attempt slot itself never matches, and
+/// the first matching candidate wins. Unit-tested below.
+fn adoption_target(
+    attempt: &str,
+    scanned_uin: u32,
+    scanned_username: &str,
+    slots: &[SlotIdentity],
+) -> Option<String> {
+    slots
+        .iter()
+        .filter(|slot| slot.account_id != attempt)
+        .find(|slot| identity_matches(slot.uin, &slot.username, scanned_uin, scanned_username))
+        .map(|slot| slot.account_id.clone())
+}
+
 impl Core {
     pub fn upstream_kind(&self) -> crate::upstream::UpstreamKind {
         self.upstream.kind()
@@ -861,7 +915,13 @@ impl Core {
         }
         if !matches!(
             op.state.as_str(),
-            "succeeded" | "failed" | "cancelled" | "expired" | "rejected" | "needs_login"
+            "succeeded"
+                | "failed"
+                | "cancelled"
+                | "expired"
+                | "rejected"
+                | "needs_login"
+                | "needs_slot_login"
         ) {
             if op.kind == "login" && op.state == "authenticating" {
                 op.result["authenticationMayBeActive"] = json!(true);
@@ -889,13 +949,14 @@ impl Core {
         account: &str,
         request: LoginRequest,
     ) -> Result<Operation> {
-        self.login_keyed(account, request, None).await
+        self.login_keyed(account, request, None, false).await
     }
     pub async fn login_keyed(
         self: &Arc<Self>,
         account: &str,
         mut request: LoginRequest,
         idempotency_key: Option<&str>,
+        auto_route: bool,
     ) -> Result<Operation> {
         self.store.account(account)?;
         self.require_profile_identity(account)?;
@@ -911,7 +972,7 @@ impl Core {
         {
             bail!("invalid login options");
         }
-        let request_hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&request)?));
+        let request_hash = login_request_hash(&request)?;
         if let Some(key) = idempotency_key {
             if key.is_empty() || key.len() > 200 {
                 bail!("invalid login idempotency key");
@@ -970,10 +1031,16 @@ impl Core {
         tokio::spawn(async move {
             let _guard = gate.lock().await;
             let outcome = core
-                .login_worker(worker_op.clone(), request, cancel, logout_epoch)
+                .login_worker(worker_op.clone(), request, cancel, logout_epoch, auto_route)
                 .await;
             if let Err(error) = outcome {
-                let _ = core.progress(&worker_op, "failed", login_failure_result(&error));
+                // The failure code alone hides the root cause; keep the whole
+                // error chain on the daemon stderr and in the operation result
+                // so a failed attempt can be diagnosed without a debugger.
+                eprintln!("login {} failed: {error:#}", worker_op.id);
+                let mut result = login_failure_result(&error);
+                result["reason"] = json!(format!("{error:#}"));
+                let _ = core.progress(&worker_op, "failed", result);
             }
             if let Ok(mut map) = core.cancels.lock() {
                 map.remove(&active_key);
@@ -981,6 +1048,398 @@ impl Core {
             }
         });
         Ok(op)
+    }
+    /// Start a login without choosing an account first. The QR code is issued
+    /// on a throwaway `pending-login-*` slot; when the scan completes, the
+    /// login is adopted into the matching account (or keeps the slot, renamed
+    /// to the WeChat identity). Poll the returned operation with the regular
+    /// per-account login endpoints using its `account_id`.
+    pub async fn login_unbound(
+        self: &Arc<Self>,
+        request: LoginRequest,
+        idempotency_key: Option<&str>,
+    ) -> Result<Operation> {
+        if let Some(key) = idempotency_key {
+            if key.is_empty() || key.len() > 200 {
+                bail!("invalid login idempotency key");
+            }
+            let request_hash = login_request_hash(&request)?;
+            // A refresh carries the same key: attach to the in-flight attempt
+            // instead of opening a second QR code. A conflicting key must not
+            // silently open another attempt.
+            for temp in self.pending_login_accounts()? {
+                if let Some(existing) =
+                    self.store
+                        .login_operation_by_key(&temp, key, &request_hash)?
+                {
+                    return Ok(existing);
+                }
+            }
+        }
+        self.reap_stale_pending_logins().await?;
+        // Only attempts that are genuinely still running consume the quota;
+        // adopted or failed leftovers must not lock new logins out.
+        if self.pending_login_in_flight()? >= MAX_PENDING_LOGINS {
+            bail!("too_many_pending_logins");
+        }
+        let temp = format!(
+            "pending-login-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..16]
+        );
+        self.create_account_with_alias(&temp, None)?;
+        match self
+            .login_keyed(&temp, request, idempotency_key, true)
+            .await
+        {
+            Ok(op) => Ok(op),
+            Err(error) => {
+                // An attempt slot without its login is unusable; never leave
+                // an empty slot behind to consume the list or the quota.
+                let _ = self.remove_account(&temp).await;
+                Err(error)
+            }
+        }
+    }
+    /// Throwaway `pending-login-*` slots, including adopted ones the UI has
+    /// not released yet.
+    fn pending_login_accounts(&self) -> Result<Vec<String>> {
+        Ok(self
+            .store
+            .accounts()?
+            .into_iter()
+            .map(|account| account.id)
+            .filter(|id| id.starts_with(PENDING_LOGIN_PREFIX))
+            .collect())
+    }
+    /// Pending slots whose latest login attempt is still running. Credentials
+    /// already installed (adopted or newly created accounts) and abandoned
+    /// attempts do not consume the concurrent-attempt quota.
+    fn pending_login_in_flight(&self) -> Result<usize> {
+        const IN_FLIGHT: [&str; 5] = [
+            "starting",
+            "resuming",
+            "awaiting_scan",
+            "awaiting_approval",
+            "authenticating",
+        ];
+        let mut count = 0;
+        for id in self.pending_login_accounts()? {
+            // A slot with saved credentials has finished its login and is only
+            // waiting for the UI to release it.
+            if self.state_unfenced(&id).is_ok() {
+                continue;
+            }
+            if let Some((state, stale)) = self.store.latest_login_op(&id)? {
+                if IN_FLIGHT.contains(&state.as_str()) && !stale {
+                    count += 1;
+                }
+            }
+        }
+        Ok(count)
+    }
+    /// Remove leftover unbound slots that nobody can still use: no worker, no
+    /// saved credentials, and no login result a UI may still be polling.
+    /// Slots with saved credentials are kept; terminal results are kept only
+    /// while recent, so abandoned attempt slots cannot accumulate forever.
+    async fn reap_stale_pending_logins(&self) -> Result<()> {
+        let active: Vec<String> = {
+            let cancels = self
+                .cancels
+                .lock()
+                .map_err(|_| anyhow::anyhow!("operation manager unavailable"))?;
+            cancels
+                .keys()
+                .filter_map(|key| key.strip_prefix("login-active:"))
+                .map(str::to_string)
+                .collect()
+        };
+        for id in self.pending_login_accounts()? {
+            if active.iter().any(|active| active == &id) {
+                continue;
+            }
+            // Adopted slots keep their credentials until the UI releases them.
+            if self.state_unfenced(&id).is_ok() {
+                continue;
+            }
+            if let Some((_state, stale)) = self.store.latest_login_op(&id)? {
+                if !stale {
+                    continue;
+                }
+            }
+            // One unremovable slot must never block a new login.
+            let _ = self.remove_account(&id).await;
+        }
+        Ok(())
+    }
+    /// Device material for a throwaway unbound-login slot: reuse any live
+    /// slot's sealed device, then fall back to this slot's own bound profile
+    /// identity, then generate a fresh one.
+    fn shared_device_profile(&self, account: &str) -> Result<DeviceProfile> {
+        for slot in self.store.accounts()? {
+            if slot.id == account || slot.id.starts_with(PENDING_LOGIN_PREFIX) {
+                continue;
+            }
+            let Some(raw) = self.store.runtime(&slot.id, "device")? else {
+                continue;
+            };
+            let Ok(opened) = self.vault.open_record(&slot.id, "device", &raw) else {
+                continue;
+            };
+            let Ok(device) = serde_json::from_slice::<DeviceProfile>(&opened) else {
+                continue;
+            };
+            if device.validate().is_ok() {
+                return Ok(device);
+            }
+        }
+        let mut device = DeviceProfile::generate("UnifiedPCLinux x86_64".into())?;
+        if let Some(binding) = self.identity_binding(account)? {
+            let identity = self.read_bound_identity(account, &binding)?;
+            device.device_id = identity.request_device_id()?.to_vec();
+            device.validate()?;
+        }
+        Ok(device)
+    }
+    /// Saved identities of every live slot, read-only: first from saved
+    /// credentials, then from the bound official profile identity (which
+    /// survives a logout or forgotten credentials). No slot state is written.
+    fn slot_identities(&self) -> Result<Vec<SlotIdentity>> {
+        let mut slots = Vec::new();
+        for account in self.store.accounts()? {
+            if let Ok(state) = self.state_unfenced(&account.id) {
+                slots.push(SlotIdentity {
+                    account_id: account.id,
+                    uin: state.uin,
+                    username: state.own_username.clone(),
+                });
+                continue;
+            }
+            let identity = self
+                .identity_binding(&account.id)
+                .ok()
+                .flatten()
+                .and_then(|binding| self.read_bound_identity(&account.id, &binding).ok());
+            if let Some(identity) = identity {
+                slots.push(SlotIdentity {
+                    account_id: account.id,
+                    uin: identity.uin,
+                    username: identity.username,
+                });
+            }
+        }
+        Ok(slots)
+    }
+    /// Find the account already bound to this WeChat identity, if any. The
+    /// attempt slot itself is skipped so it never matches itself.
+    fn find_identity_owner(&self, skip: &str, uin: u32, username: &str) -> Result<Option<String>> {
+        let slots = self.slot_identities()?;
+        Ok(adoption_target(skip, uin, username, &slots))
+    }
+    /// True when the slot currently runs a session validated by this daemon
+    /// generation and wants to stay connected. A scan completed elsewhere must
+    /// never silently replace such a session: the identity already has one
+    /// writer, and installing again would double-bind it.
+    fn identity_slot_online(&self, account: &str) -> Result<bool> {
+        Ok(self
+            .store
+            .runtime(account, "validated-generation")?
+            .as_deref()
+            == Some(self.ownership_generation.as_bytes())
+            && self.store.runtime(account, "desired")?.as_deref() == Some(b"connected"))
+    }
+    /// Undo the connected markers of an adopted install while keeping the
+    /// saved credentials, so a retry is not blocked by `identity_in_use`.
+    fn rollback_adopted_install(&self, account: &str) -> Result<()> {
+        self.store.clear_runtime(account, "validated-generation")?;
+        self.store
+            .put_runtime(account, "desired", b"disconnected")?;
+        self.store.append_event(
+            account,
+            "account.updated",
+            &json!({"accountId":account,"connection":"disconnected"}),
+        )?;
+        Ok(())
+    }
+    /// Route a completed unbound login to its account: install the fresh
+    /// credentials into the matching slot, or keep the throwaway slot
+    /// (renamed to the identity) when this is a new account. A bound slot
+    /// that refuses the foreign device material reports `needs_slot_login`
+    /// so the caller can retry on the slot itself; a slot that already runs
+    /// this identity online reports `identity_in_use` instead of double-binding.
+    async fn adopt_login(
+        self: &Arc<Self>,
+        temp: &str,
+        state: &AccountState,
+        op: &Operation,
+        logout_epoch: Option<&[u8]>,
+    ) -> Result<()> {
+        // Identity lookup reads every slot's profile files; keep that off the
+        // async worker thread.
+        let owner = {
+            let core = self.clone();
+            let skip = temp.to_string();
+            let uin = state.uin;
+            let username = state.own_username.clone();
+            blocking(move || core.find_identity_owner(&skip, uin, &username)).await?
+        };
+        if let Some(target) = owner {
+            // One writer per profile: hold the target's account gate so its
+            // worker cannot touch the slot while credentials are installed.
+            let _guard = self.lock_account(&target).await?;
+            if self.identity_slot_online(&target)? {
+                bail!("identity_in_use");
+            }
+            // The target must have no active session: stop any native client,
+            // cancel an in-flight login, and normalize the desired state
+            // before credentials are written. A slot that never connected has
+            // nothing to tear down.
+            let residual = self
+                .store
+                .runtime(&target, "validated-generation")?
+                .is_some()
+                || !matches!(self.native_account_lease(&target), Ok(None));
+            if residual {
+                self.disconnect(&target)?;
+            }
+            // The attempt never ran on the target, so authorize against the
+            // target's current logout epoch; a logout that races the install
+            // still fails the commit.
+            let target_epoch = self.store.runtime(&target, "logout-epoch")?;
+            // The attempt's operation row lives on the throwaway slot, so the
+            // target-side commit guard cannot see it. Refuse to install when
+            // the attempt already reached a terminal state, and let the
+            // target's logout epoch (checked inside the commit) fence staleness.
+            let attempt_state = self.store.operation(temp, &op.id)?.state;
+            ensure!(
+                !matches!(
+                    attempt_state.as_str(),
+                    "cancelled" | "expired" | "failed" | "rejected"
+                ),
+                "authorization_generation_changed"
+            );
+            // The scan ran on a throwaway slot with its own device, while the
+            // bound profile dictates the device id. Align it here, otherwise
+            // `check_state_profile` rejects a perfectly valid identity with
+            // `account_device_mismatch`.
+            let mut adopted = state.clone();
+            let mut device_adjusted = false;
+            if let Some(binding) = self.identity_binding(&target)? {
+                let identity = self.read_bound_identity(&target, &binding)?;
+                if identity.username == adopted.own_username && identity.uin == adopted.uin {
+                    let expected = identity.request_device_id()?.to_vec();
+                    if adopted.device.device_id != expected {
+                        adopted.device.device_id = expected;
+                        adopted.device.validate()?;
+                        device_adjusted = true;
+                    }
+                }
+            }
+            match self.install_login_operation(&target, &adopted, target_epoch.as_deref(), None) {
+                Ok(()) => {
+                    // A cancel may land while the commit is running; never
+                    // leave a connected session the user already cancelled.
+                    if self.store.operation(temp, &op.id)?.state == "cancelled" {
+                        self.rollback_adopted_install(&target)?;
+                        self.progress(
+                            op,
+                            "cancelled",
+                            json!({"authenticationAcceptedButNotInstalled":true}),
+                        )?;
+                        return Ok(());
+                    }
+                    let initialize = self.clone();
+                    let profile_account = target.clone();
+                    let profile_state = adopted;
+                    match blocking(move || {
+                        initialize.ensure_managed_profile(&profile_account, &profile_state)
+                    })
+                    .await
+                    {
+                        Ok(profile) => {
+                            drop(_guard);
+                            self.store.append_event(
+                                &target,
+                                "account.updated",
+                                &json!({"accountId":target,"adoptedFrom":temp,"authenticated":true}),
+                            )?;
+                            self.progress(
+                                op,
+                                "succeeded",
+                                json!({"method":"auto_login","adopted":true,"adoptedAccountId":target,"accountId":target,"deviceAdjusted":device_adjusted,"profile":profile}),
+                            )?;
+                        }
+                        Err(error) => {
+                            // Credentials are installed, but the managed
+                            // profile could not be opened. Keep them saved,
+                            // drop the connected markers, and report the real
+                            // reason so a retry is not blocked by
+                            // `identity_in_use`.
+                            eprintln!("login {} adopt profile failed: {error:#}", op.id);
+                            self.rollback_adopted_install(&target)?;
+                            let mut result = login_failure_result(&error);
+                            result["reason"] = json!(format!("{error:#}"));
+                            self.progress(op, "failed", result)?;
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.progress(
+                        op,
+                        "needs_slot_login",
+                        json!({"accountId":target,"reason":error.to_string()}),
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+        if valid_pending_alias(&state.own_username)
+            && self
+                .store
+                .set_account_alias(temp, &state.own_username)
+                .is_err()
+        {
+            // Another slot already owns that name. Keep the scan usable with a
+            // short generated suffix instead of dropping the alias.
+            let suffix = &uuid::Uuid::new_v4().simple().to_string()[..6];
+            let fallback = format!(
+                "{}-{suffix}",
+                &state.own_username[..state.own_username.len().min(20)]
+            );
+            let _ = self.store.set_account_alias(temp, &fallback);
+        }
+        // New identity: the attempt slot becomes the account. Install the
+        // credentials there exactly like a bound login would, against the
+        // attempt's own logout fence.
+        self.install_login_operation(temp, state, logout_epoch, Some(&op.id))?;
+        if self.store.operation(temp, &op.id)?.state == "cancelled" {
+            self.rollback_adopted_install(temp)?;
+            self.progress(
+                op,
+                "cancelled",
+                json!({"authenticationAcceptedButNotInstalled":true}),
+            )?;
+            return Ok(());
+        }
+        let initialize = self.clone();
+        let profile_account = temp.to_string();
+        let profile_state = state.clone();
+        match blocking(move || initialize.ensure_managed_profile(&profile_account, &profile_state))
+            .await
+        {
+            Ok(profile) => self.progress(
+                op,
+                "succeeded",
+                json!({"method":"auto_login","adopted":false,"adoptedAccountId":null,"accountId":temp,"profile":profile}),
+            )?,
+            Err(error) => {
+                eprintln!("login {} promote profile failed: {error:#}", op.id);
+                self.rollback_adopted_install(temp)?;
+                let mut result = login_failure_result(&error);
+                result["reason"] = json!(format!("{error:#}"));
+                self.progress(op, "failed", result)?;
+            }
+        }
+        Ok(())
     }
     fn progress(&self, op: &Operation, state: &str, result: Value) -> Result<()> {
         if self
@@ -1003,6 +1462,7 @@ impl Core {
         request: LoginRequest,
         cancel: Arc<AtomicBool>,
         logout_epoch: Option<Vec<u8>>,
+        auto_route: bool,
     ) -> Result<()> {
         if cancel.load(Ordering::SeqCst) || self.stopping.load(Ordering::SeqCst) {
             self.progress(&op, "cancelled", json!({}))?;
@@ -1129,12 +1589,20 @@ impl Core {
                     &self.vault.open_record(&account, "device", &raw)?,
                 )?
             } else {
-                let mut device = DeviceProfile::generate("UnifiedPCLinux x86_64".into())?;
-                if let Some(binding) = self.identity_binding(&account)? {
-                    let identity = self.read_bound_identity(&account, &binding)?;
-                    device.device_id = identity.request_device_id()?.to_vec();
-                    device.validate()?;
-                }
+                // A throwaway unbound-login slot has no profile of its own.
+                // Reuse a live slot's device (or the bound profile identity)
+                // so the scan is not issued on random hardware.
+                let device = if auto_route {
+                    self.shared_device_profile(&account)?
+                } else {
+                    let mut device = DeviceProfile::generate("UnifiedPCLinux x86_64".into())?;
+                    if let Some(binding) = self.identity_binding(&account)? {
+                        let identity = self.read_bound_identity(&account, &binding)?;
+                        device.device_id = identity.request_device_id()?.to_vec();
+                        device.validate()?;
+                    }
+                    device
+                };
                 self.store.put_runtime(
                     &account,
                     "device",
@@ -1256,24 +1724,29 @@ impl Core {
                         )?;
                         return Ok(());
                     }
-                    self.install_login_operation(
-                        &account,
-                        &state,
-                        logout_epoch.as_deref(),
-                        Some(&op.id),
-                    )?;
-                    let initialize = self.clone();
-                    let profile_account = account.clone();
-                    let profile_state = state.clone();
-                    let profile = blocking(move || {
-                        initialize.ensure_managed_profile(&profile_account, &profile_state)
-                    })
-                    .await?;
-                    self.progress(
-                        &op,
-                        "succeeded",
-                        json!({"method":"approved_login","profile":profile}),
-                    )?;
+                    if auto_route {
+                        self.adopt_login(&account, &state, &op, logout_epoch.as_deref())
+                            .await?;
+                    } else {
+                        self.install_login_operation(
+                            &account,
+                            &state,
+                            logout_epoch.as_deref(),
+                            Some(&op.id),
+                        )?;
+                        let initialize = self.clone();
+                        let profile_account = account.clone();
+                        let profile_state = state.clone();
+                        let profile = blocking(move || {
+                            initialize.ensure_managed_profile(&profile_account, &profile_state)
+                        })
+                        .await?;
+                        self.progress(
+                            &op,
+                            "succeeded",
+                            json!({"method":"approved_login","profile":profile}),
+                        )?;
+                    }
                     self.start_workers()?;
                     return Ok(());
                 }
@@ -2498,6 +2971,7 @@ fn login_failure_result(error: &anyhow::Error) -> Value {
         "account_identity_mismatch",
         "account_database_password_mismatch",
         "account_device_mismatch",
+        "identity_in_use",
         "profile_identity_unavailable",
         "profile_database_password_required",
         "profile_saved_key_info_unavailable",
@@ -4766,5 +5240,321 @@ mod tests {
             .put_runtime("one", "send-last:peer", b"1000")
             .unwrap();
         core.check_contact_send_interval("one", "peer").unwrap();
+    }
+
+    #[test]
+    fn unbound_login_matches_exact_identity_only() {
+        assert!(identity_matches(100, "wxid_a", 100, "wxid_a"));
+        assert!(!identity_matches(100, "wxid_a", 101, "wxid_a"));
+        assert!(!identity_matches(100, "wxid_a", 100, "wxid_b"));
+        assert!(!identity_matches(100, "wxid_a", 101, "wxid_b"));
+    }
+
+    #[test]
+    fn pending_login_alias_accepts_store_charset() {
+        assert!(valid_pending_alias("wxid_abc-123"));
+        assert!(!valid_pending_alias(""));
+        assert!(!valid_pending_alias("has space"));
+        assert!(!valid_pending_alias("wxid@x"));
+        assert!(!valid_pending_alias(&"a".repeat(65)));
+    }
+
+    fn slot(id: &str, uin: u32, username: &str) -> SlotIdentity {
+        SlotIdentity {
+            account_id: id.into(),
+            uin,
+            username: username.into(),
+        }
+    }
+
+    #[test]
+    fn adoption_target_keeps_the_attempt_slot_unless_another_slot_holds_the_identity() {
+        let slots = [
+            slot("one", 1, "wxid_a"),
+            slot("pending-login-x", 9, "wxid_z"),
+        ];
+        // A matching slot wins over keeping the attempt slot.
+        assert_eq!(
+            adoption_target("pending-login-x", 1, "wxid_a", &slots).as_deref(),
+            Some("one")
+        );
+        // The attempt slot itself never matches, even when it holds the identity.
+        assert_eq!(adoption_target("one", 1, "wxid_a", &slots), None);
+        // No candidate holds the scanned identity: the attempt slot stays.
+        assert_eq!(
+            adoption_target("pending-login-x", 2, "wxid_b", &slots),
+            None
+        );
+        // Identity must agree on both uin and wxid.
+        assert_eq!(
+            adoption_target("pending-login-x", 1, "wxid_b", &slots),
+            None
+        );
+        assert_eq!(
+            adoption_target("pending-login-x", 2, "wxid_a", &slots),
+            None
+        );
+        // The first matching candidate wins.
+        let duplicates = [slot("first", 1, "wxid_a"), slot("second", 1, "wxid_a")];
+        assert_eq!(
+            adoption_target("pending-login-x", 1, "wxid_a", &duplicates).as_deref(),
+            Some("first")
+        );
+    }
+
+    /// A slot with a bound official profile identity and no saved credentials
+    /// (as after a logout that cleared them), plus a fresh throwaway attempt
+    /// slot with a saved login operation.
+    fn adopt_fixture() -> (tempfile::TempDir, Arc<Core>, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        let account = store.create_account("one").unwrap();
+        let format_key = [9; 16];
+        let pair = wechat_profile::create_mmkv_v4(&format_key, [3; 16], 4096).unwrap();
+        let accepted = state();
+        let pair = wechat_profile::stage_mmkv_values(
+            pair.data(),
+            pair.metadata(),
+            &format_key,
+            &[
+                (
+                    "mmkv_key_user_name".into(),
+                    Some(
+                        wechat_profile::mmkv_string_value(accepted.own_username.as_bytes())
+                            .unwrap()
+                            .to_vec(),
+                    ),
+                ),
+                ("mmkv_key_latest_login_uin".into(), Some(vec![1])),
+                (
+                    "key_wechat_device_id".into(),
+                    Some(
+                        wechat_profile::mmkv_string_value(&accepted.device.device_id)
+                            .unwrap()
+                            .to_vec(),
+                    ),
+                ),
+            ],
+        )
+        .unwrap();
+        let mmkv = account.profile_path.join("identity");
+        std::fs::write(&mmkv, pair.data()).unwrap();
+        std::fs::write(mmkv.with_extension("crc"), pair.metadata()).unwrap();
+        let core = Core::new(store.clone(), None).unwrap();
+        core.bind_profile_identity("one", &mmkv, &format_key)
+            .unwrap();
+        // Credentials were forgotten: only the profile identity remains.
+        store.clear_runtime("one", "account-state").unwrap();
+        let attempt = "pending-login-fixture0";
+        store.create_account(attempt).unwrap();
+        let op = Operation {
+            id: uuid::Uuid::new_v4().to_string(),
+            account_id: attempt.into(),
+            kind: "login".into(),
+            state: "authenticating".into(),
+            result: json!({}),
+            created_at: now(),
+            updated_at: now(),
+        };
+        store.save_operation(&op).unwrap();
+        (temp, core, op.id)
+    }
+
+    #[tokio::test]
+    async fn adopted_login_installs_credentials_into_the_matching_slot() {
+        let (_dir, core, op_id) = adopt_fixture();
+        let op = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        core.adopt_login("pending-login-fixture0", &state(), &op, None)
+            .await
+            .unwrap();
+        // The credentials are sealed in the target slot's own vault namespace
+        // with the same persist flow a bound login uses; the attempt slot
+        // keeps none.
+        let result = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        assert_eq!(result.state, "succeeded", "result: {}", result.result);
+        assert!(core
+            .store
+            .runtime("one", "account-state")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            core.store
+                .runtime("one", "validated-generation")
+                .unwrap()
+                .as_deref(),
+            Some(core.ownership_generation.as_bytes())
+        );
+        assert_eq!(
+            core.store.runtime("one", "desired").unwrap().as_deref(),
+            Some(b"connected".as_slice())
+        );
+        assert!(core.store.runtime("one", "logged-out").unwrap().is_none());
+        assert!(core
+            .store
+            .runtime("pending-login-fixture0", "account-state")
+            .unwrap()
+            .is_none());
+        // The attempt reports both the adopted slot and the final account id.
+        let result = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        assert_eq!(result.state, "succeeded");
+        assert_eq!(result.result["adoptedAccountId"], "one");
+        assert_eq!(result.result["accountId"], "one");
+        assert_eq!(result.result["adopted"], true);
+    }
+
+    #[tokio::test]
+    async fn fresh_login_is_admitted_when_stored_keys_cover_the_databases() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
+        let record = store.create_account("one").unwrap();
+        let format_key = [9; 16];
+
+        // The first login initializes the official home encrypted with the
+        // server-issued password of that session and stores the derived keys.
+        // The initializer also creates the identity mmkv the binding reads.
+        let mut first = state();
+        first.database_password = vec![7; 32];
+        let (_, keys, _) = wechat_profile::initialize_official_home(
+            &record.profile_path,
+            &wechat_profile::OfficialHomeBootstrap {
+                username: first.own_username.clone(),
+                uin: first.uin,
+                device_id: first.device.device_id.clone(),
+                global_values: vec![],
+            },
+            &first.database_password,
+            &format_key,
+        )
+        .unwrap();
+        let core = Core::new(store.clone(), None).unwrap();
+        core.bind_profile_identity(
+            "one",
+            &record
+                .profile_path
+                .join("xwechat_files/all_users/config/global_config"),
+            &format_key,
+        )
+        .unwrap();
+        let keys_path = store.root.join("accounts/one/agent/profile-keys.json");
+        keys.write_new(&keys_path).unwrap();
+        store.set_keys_file("one", &keys_path).unwrap();
+        core.install_login_operation("one", &first, None, None)
+            .unwrap();
+
+        // A fresh login carries a new server-issued password. The stored keys
+        // still cover every database with matching salts, so the install must
+        // be admitted by coverage instead of being rejected as a mismatch.
+        let mut second = state();
+        second.database_password = vec![8; 32];
+        core.install_login_operation("one", &second, None, None)
+            .unwrap();
+        assert_eq!(
+            core.state_unfenced("one").unwrap().database_password,
+            vec![8; 32]
+        );
+    }
+
+    #[tokio::test]
+    async fn adopted_login_aligns_a_foreign_device_to_the_bound_profile() {
+        let (_dir, core, op_id) = adopt_fixture();
+        let op = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        // The scan ran on a throwaway slot, so it carried a different device.
+        let mut scanned = state();
+        scanned.device.device_id = [b"B".as_slice(), &[2u8; 15]].concat();
+        core.adopt_login("pending-login-fixture0", &scanned, &op, None)
+            .await
+            .unwrap();
+        // The bound profile still dictates the device id, and the attempt is
+        // not rejected with `account_device_mismatch`.
+        assert_eq!(
+            core.state_unfenced("one").unwrap().device.device_id,
+            state().device.device_id
+        );
+        let result = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        assert_eq!(result.state, "succeeded", "result: {}", result.result);
+        assert_eq!(result.result["deviceAdjusted"], true);
+    }
+
+    #[tokio::test]
+    async fn adopted_login_routes_through_the_profile_identity_after_a_logout() {
+        let (_dir, core, op_id) = adopt_fixture();
+        // A logout after the credentials were forgotten leaves only the
+        // profile identity; adoption must still find the original slot.
+        core.logout_local("one").unwrap();
+        assert!(core.state_unfenced("one").is_err());
+        let op = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        core.adopt_login("pending-login-fixture0", &state(), &op, None)
+            .await
+            .unwrap();
+        assert!(core
+            .store
+            .runtime("one", "account-state")
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            core.store
+                .operation("pending-login-fixture0", &op_id)
+                .unwrap()
+                .result["adoptedAccountId"],
+            "one"
+        );
+    }
+
+    #[tokio::test]
+    async fn adoption_refuses_to_double_bind_an_online_identity() {
+        let (_dir, core, op_id) = adopt_fixture();
+        core.store
+            .put_runtime(
+                "one",
+                "validated-generation",
+                core.ownership_generation.as_bytes(),
+            )
+            .unwrap();
+        core.store
+            .put_runtime("one", "desired", b"connected")
+            .unwrap();
+        let op = core
+            .store
+            .operation("pending-login-fixture0", &op_id)
+            .unwrap();
+        let error = core
+            .adopt_login("pending-login-fixture0", &state(), &op, None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "identity_in_use");
+        assert_eq!(
+            login_failure_result(&error)["code"],
+            json!("identity_in_use")
+        );
+        // The online slot was not touched and the attempt failed without
+        // installing anything anywhere.
+        assert!(core
+            .store
+            .runtime("one", "account-state")
+            .unwrap()
+            .is_none());
+        assert!(core
+            .store
+            .runtime("pending-login-fixture0", "account-state")
+            .unwrap()
+            .is_none());
     }
 }

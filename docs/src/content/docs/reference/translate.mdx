@@ -5,13 +5,14 @@ description: Fix a translation, keep one up to date or add a language to the app
 
 import { Aside } from '@astrojs/starlight/components';
 
-The desktop app, the web UI and these docs are written in English and translated into
-other languages. Anything not yet translated shows in English, so a partial
+The desktop app and the daemon's `/ui/` page share one React chat interface in
+`wechat-ui/`. Anything not yet translated shows in English, so a partial
 translation is always safe to ship.
 
-| What | English source | Translation |
+| What | Source | Translation |
 | --- | --- | --- |
-| App text | `packages/client-ui/locales/en.json` | `packages/client-ui/locales/<lang>.json` |
+| Chat interface text | Chinese text passed to `t()` in `wechat-ui/src/` | `wechat-ui/src/i18n/dict/en/` |
+| Desktop shell text | `wechat-ui/src/i18n/shell/en.json` | `wechat-ui/src/i18n/shell/<lang>.json` |
 | Docs page | `docs/src/content/docs/<page>.mdx` | `docs/src/content/docs/<folder>/<page>.mdx` |
 | Word choices | | `docs/i18n/glossary/<lang>.md` |
 
@@ -20,8 +21,9 @@ The CLI, HTTP API errors and logs stay in English, because scripts and agents re
 ## Fix a translation
 
 1. Edit the text in the translation file. Keep `{{placeholders}}` exactly as in
-   English and follow the language's glossary.
-2. Check it:
+   English and follow the language's glossary. The chat interface's English
+   catalogue is reviewed with the code that uses it, not by `pnpm i18n`.
+2. Check the desktop shell and docs translations:
 
    ```bash
    pnpm i18n check
@@ -77,19 +79,21 @@ structure so the check can compare the two:
 
 ## Add a language
 
-1. App: add `packages/client-ui/locales/<lang>.json` (start with `{}`) and list the
-   tag in `languages` in `packages/client-ui/src/i18n.ts` and `CATALOGS` in
-   `packages/desktop/src-tauri/src/i18n.rs`.
-2. Docs: add the language to `docs/locales.mjs` and create its folder, for example
+1. Chat interface: add `wechat-ui/src/i18n/dict/<lang>/` (start empty) and register
+   it in `wechat-ui/src/i18n/bootstrap.ts` and `SUPPORTED_LOCALES` in
+   `wechat-ui/src/i18n/index.ts`.
+2. Desktop shell: add `wechat-ui/src/i18n/shell/<lang>.json` and list the tag in
+   `CATALOGS` in `packages/desktop/src-tauri/src/i18n.rs`.
+3. Docs: add the language to `docs/locales.mjs` and create its folder, for example
    `docs/src/content/docs/ja/`.
-3. Add `docs/i18n/glossary/<lang>.md` with the official WeChat terms in that language.
-4. Run `pnpm i18n check` and open a pull request.
+4. Add `docs/i18n/glossary/<lang>.md` with the official WeChat terms in that language.
+5. Run `pnpm i18n check` and open a pull request.
 
 <Aside title="Good to know">
-- `pnpm i18n check` runs in CI. It fails only for problems a reader would see:
-  unknown keys, changed placeholders, missing plural forms, empty text, or a docs
-  page whose code, components, links or anchors differ from English. Missing and
-  out-of-date translations never fail it.
+- `pnpm i18n check` covers the desktop shell catalogs and docs. It fails only for
+  problems a reader would see: unknown keys, changed placeholders, missing plural
+  forms, empty text, or a docs page whose code, components, links or anchors differ
+  from English. Missing and out-of-date translations never fail it.
 - A translation a machine wrote is recorded as such; once a person edits it, it
   counts as theirs.
 </Aside>

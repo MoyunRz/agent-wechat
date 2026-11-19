@@ -3,7 +3,7 @@ on:
   pull_request:
     paths:
       - 'packages/desktop/**'
-      - 'packages/client-ui/**'
+      - 'wechat-ui/**'
       - 'packages/native-client-rust/**'
       - 'rust-toolchain.toml'
       - 'packages/cli/**'
@@ -95,7 +95,7 @@ jobs:
               - '.github/workflows/native-portable.yml'
               - '.github/workflows/native-release.yml'
               - 'packages/desktop/**'
-              - 'packages/client-ui/**'
+              - 'wechat-ui/**'
               - 'packages/shared/**'
               - 'packages/native-client-rust/**'
               - 'packages/cli/**'

@@ -1,0 +1,30 @@
+/* Shell layout helpers added by the React port.
+   ThreadList and ContactsPanel stay mounted so avatars, scroll position and
+   in-flight loads survive switching between the chat and contacts views (the
+   Vue app used <KeepAlive>). `display: contents` keeps them as direct flex
+   children of .app-shell; the inactive slot collapses completely. */
+/* The desktop update banner sits above the application shell. */
+.app-shell-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-shell-wrap > .app-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rail-slot {
+  display: contents;
+}
+
+.rail-slot[hidden] {
+  display: none;
+}
+
+/* Desktop-only chrome sits outside the chat column. */
+.desktop-notice {
+  flex: 0 0 auto;
+}

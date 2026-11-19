@@ -1,0 +1,1055 @@
+/*
+ * Message timeline and message bubbles. Both Vue scoped style blocks merged
+ * into one sheet with identical selectors and values; :deep() becomes a plain
+ * descendant selector. The bubble block comes first so the official-account
+ * feed overrides win the same specificity ties they won in the Vue cascade.
+ */
+
+/* ---- MessageBubble.vue -------------------------------------------------- */
+
+.message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 2px 0;
+}
+
+.message-row.group-start {
+  padding-top: 9px;
+}
+
+.message-row.own {
+  justify-content: flex-end;
+}
+
+.message-avatar {
+  margin-bottom: 2px;
+}
+
+.message-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: min(70%, 620px);
+  gap: 3px;
+}
+
+.reply-action {
+  position: absolute;
+  top: -4px;
+  right: -30px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.message-row:hover .reply-action {
+  opacity: 1;
+}
+
+.reply-action:hover {
+  color: var(--accent);
+  background: var(--panel-hover);
+}
+
+.message-row.own .reply-action {
+  right: auto;
+  left: -30px;
+}
+
+.message-row.own .message-stack {
+  align-items: flex-end;
+}
+
+.bubble {
+  position: relative;
+  padding: 8px 12px 6px;
+  border-radius: 17px 17px 17px 6px;
+  background: var(--bubble-in-bg);
+  color: var(--bubble-in-text, var(--text));
+  box-shadow: var(--bubble-shadow);
+}
+
+.bubble.own {
+  border-radius: 17px 17px 6px 17px;
+  background: var(--bubble-out);
+  color: var(--bubble-out-text, #fff);
+  box-shadow: var(--bubble-out-shadow);
+}
+
+.bubble.grouped-bubble,
+.bubble.own.grouped-bubble {
+  border-radius: 17px;
+}
+
+.image-line {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.image-line.own {
+  align-items: flex-end;
+}
+
+.image-content {
+  display: block;
+  width: auto;
+  max-width: min(320px, 100%);
+  max-height: 360px;
+  border-radius: 14px;
+  object-fit: contain;
+  background: var(--panel-soft);
+  box-shadow: var(--media-shadow);
+}
+
+.image-content.pending {
+  opacity: 0.72;
+}
+
+/* Image loading placeholder: a 60x60 square with a spinner (media in flight). */
+.image-loading-box {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+  box-shadow: var(--media-shadow);
+}
+
+.image-spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--muted-soft);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+/* Non-sticker images open a lightbox: the cursor offers the zoom. */
+.image-content.clickable {
+  cursor: zoom-in;
+}
+
+.image-content.error {
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.55), var(--media-shadow);
+}
+
+/* Terminal media placeholder (unavailable sticker, failed fetch): same 60x60
+   square as the loading state, icon only, reason in the hover title. */
+.image-placeholder {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+  box-shadow: var(--media-shadow);
+  color: var(--text-soft);
+}
+
+.image-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-soft);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.image-meta.error .send-status {
+  color: var(--danger-text);
+}
+
+.bubble.pending {
+  opacity: 0.72;
+}
+
+.bubble.error {
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.5);
+}
+
+.bubble-text {
+  margin: 0;
+  font-size: var(--bubble-font-size, 13.5px);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble-text .emoticon {
+  font-size: 1.4em;
+  line-height: 1;
+  vertical-align: -0.18em;
+}
+
+.voice-line {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 1px 0 3px;
+}
+
+.voice-bubble {
+  min-width: 104px;
+  padding: 8px 12px 5px;
+}
+
+.local-media {
+  margin: 1px 0 3px;
+}
+
+.local-media img,
+.local-media video {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 320px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: var(--panel-soft);
+}
+
+.local-file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--bubble-in-surface);
+}
+
+.local-file-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--bubble-in-surface);
+}
+
+.local-file-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.local-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.local-file-size {
+  font-size: 10px;
+  opacity: 0.68;
+}
+
+.server-media {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.media-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: var(--bubble-in-surface);
+  font-size: 11.5px;
+  line-height: 1.4;
+  opacity: 0.86;
+}
+
+.video-poster {
+  position: relative;
+  display: block;
+  max-width: min(320px, 100%);
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bubble-in-surface);
+}
+
+.video-poster:disabled {
+  cursor: progress;
+}
+
+.video-poster img {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+}
+
+.video-poster-mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.32);
+  transition: background 0.15s ease;
+}
+
+.video-poster:hover .video-poster-mask {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.video-poster-label {
+  font-size: 11px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.bubble.own .media-placeholder {
+  background: var(--bubble-out-surface-strong);
+}
+
+.bubble.own .local-file,
+.bubble.own .local-file-icon,
+.bubble.own .quote-block,
+.bubble.own .link-card,
+.bubble.own .card-icon,
+.bubble.own .location-card {
+  background: var(--bubble-out-surface);
+}
+
+.bubble.own .server-file:hover,
+.bubble.own .link-card:hover {
+  background: var(--bubble-out-surface-strong);
+}
+
+.server-file {
+  color: inherit;
+  text-decoration: none;
+}
+
+.server-file:hover {
+  background: var(--bubble-in-surface-strong);
+}
+
+.bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 3px;
+  color: var(--bubble-in-meta);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bubble.own .bubble-meta {
+  color: var(--bubble-out-meta);
+}
+
+.send-status {
+  margin-right: 2px;
+}
+
+.bubble.error .send-status {
+  color: var(--bubble-in-danger, var(--danger-text));
+}
+
+.bubble.own.error .send-status {
+  color: var(--bubble-out-danger);
+}
+
+.read-check {
+  opacity: 0.8;
+}
+
+.quote-block {
+  display: flex;
+  gap: 7px;
+  margin: 1px 0 6px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--bubble-in-surface);
+}
+
+.quote-bar {
+  flex: 0 0 auto;
+  width: 2px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.quote-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quote-sender {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.66;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.quote-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  opacity: 0.82;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.quote-block.clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.quote-block.clickable:hover {
+  background: var(--bubble-in-surface-strong);
+}
+
+.quote-link-icon {
+  flex: 0 0 auto;
+  vertical-align: -1px;
+  margin-right: 3px;
+  opacity: 0.8;
+}
+
+.link-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 2px 0 6px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--bubble-in-surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.link-card:hover {
+  background: var(--bubble-in-surface-strong);
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.card-meta {
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.72;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.card-source {
+  font-size: 10.5px;
+  opacity: 0.6;
+}
+
+.card-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--bubble-in-surface);
+  opacity: 0.9;
+}
+
+.location-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--bubble-in-surface);
+}
+
+/* Friend request card: one flat card. The bubble loses its own surface and the
+   card carries the whole visual. */
+.bubble:has(.friend-request-card) {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bubble:has(.friend-request-card) .bubble-meta {
+  padding: 5px 6px 0;
+}
+
+.friend-request-card {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  width: 300px;
+  margin: 2px 0 4px;
+  padding: 13px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bubble-in-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  transition: border-color 0.15s ease;
+}
+
+.message-row:hover .friend-request-card {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+
+.fr-avatar {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.fr-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--bubble-in-bg, var(--bubble-in-surface));
+}
+
+.fr-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.fr-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.fr-greeting {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* Status row: no separator, right aligned; handled states render as pills. */
+.fr-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.fr-state-ok,
+.fr-state-no {
+  width: fit-content;
+  margin-left: auto;
+  padding: 4px 11px;
+  border-radius: 999px;
+}
+
+.fr-state-ok {
+  background: color-mix(in srgb, #22c55e 14%, transparent);
+  color: #4ade80;
+}
+
+.fr-state-no {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  color: var(--muted);
+}
+
+.fr-accept {
+  padding: 3px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.fr-accept:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.fr-accept:disabled {
+  opacity: 0.55;
+}
+
+.fr-decline {
+  padding: 3px 14px;
+  border: 1px solid color-mix(in srgb, #e5484d 55%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: #e5484d;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.fr-decline:hover:not(:disabled) {
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+  border-color: #e5484d;
+}
+
+.fr-decline:disabled {
+  opacity: 0.55;
+}
+
+.fr-error {
+  color: #e5484d;
+}
+
+.fr-note {
+  color: var(--muted-soft);
+}
+
+.system-row {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.system-text {
+  max-width: 72%;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Mobile: wider bubbles, images do not touch the edge. */
+@media (max-width: 768px) {
+  .bubble {
+    max-width: min(82%, 620px);
+  }
+
+  .image-content {
+    max-width: min(280px, 72vw);
+  }
+
+  .reply-action {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* ---- MessageList.vue ---------------------------------------------------- */
+
+.message-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.message-inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100%;
+  padding: 20px 24px 12px;
+}
+
+/* Official account card feed: one article card column, title/source/time text
+   hierarchy. */
+.official-feed {
+  width: 100%;
+  max-width: 680px;
+  align-self: center;
+}
+
+.official-feed .message-row {
+  justify-content: flex-start;
+  padding: 6px 0;
+}
+
+.official-feed .message-avatar,
+.official-feed .reply-action,
+.official-feed .read-check {
+  display: none;
+}
+
+.official-feed .message-stack {
+  max-width: 100%;
+  width: 100%;
+  align-items: stretch;
+}
+
+.official-feed .bubble {
+  width: 100%;
+  border-radius: 16px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  padding: 13px 16px 9px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.official-feed .message-row:hover .bubble {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: var(--panel-hover);
+}
+
+.official-feed .bubble.own {
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.official-feed .bubble-text {
+  font-size: 13.5px;
+  line-height: 1.65;
+  margin: 1px 0 3px;
+}
+
+/* The inner link card drops its own box and becomes the article body. */
+.official-feed .link-card {
+  width: 100%;
+  margin: 0 0 3px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.official-feed .link-card:hover {
+  background: transparent;
+}
+
+.official-feed .card-body {
+  gap: 5px;
+}
+
+.official-feed .card-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--text);
+  -webkit-line-clamp: 3;
+}
+
+.official-feed .card-meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  -webkit-line-clamp: 2;
+}
+
+.official-feed .card-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+.official-feed .card-source::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+/* Link badge: a ghost round button that picks up the accent on hover. */
+.official-feed .card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.official-feed .message-row:hover .card-icon {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.official-feed .image-line {
+  width: 100%;
+}
+
+.official-feed .image-line.own {
+  align-items: stretch;
+}
+
+.official-feed .image-content {
+  width: 100%;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.official-feed .voice-line,
+.official-feed .voice-line .bubble {
+  width: 100%;
+}
+
+.official-feed .bubble-meta,
+.official-feed .image-meta {
+  justify-content: flex-end;
+  margin-top: 3px;
+}
+
+.official-feed .bubble-time {
+  color: var(--muted-soft);
+  font-size: 10.5px;
+}
+
+/* Day divider: a thin outlined pill, separated from the cards. */
+.official-feed .day-divider {
+  padding: 16px 0 10px;
+}
+
+.official-feed .day-divider span {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-soft);
+}
+
+.load-older {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.load-older:hover:not(:disabled) {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.day-divider {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 8px;
+}
+
+.day-divider span {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--muted-soft);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.message-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 260px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.message-empty p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Brand welcome screen shown when no conversation is open: it replaces the old
+   "select a chat" placeholder so the first screen does not look like a
+   personal conversation. */
+.welcome-screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 260px;
+  text-align: center;
+}
+
+.welcome-logo {
+  display: block;
+  width: 82px;
+  height: 82px;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 16px 22px rgba(37, 126, 183, 0.16));
+}
+
+.welcome-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.welcome-screen h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.welcome-slogan {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.welcome-hint {
+  margin-top: 14px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.message-empty span {
+  font-size: 11.5px;
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 6px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.message-skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 0;
+}
+
+.message-skeleton {
+  width: 42%;
+  height: 40px;
+  border-radius: 16px 16px 16px 5px;
+  background: var(--panel-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.message-skeleton.own {
+  align-self: flex-end;
+  border-radius: 16px 16px 5px 16px;
+  background: var(--accent-soft);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.95; }
+}
+
+/* Search highlight: applied to the MessageBubble root element. */
+.message-flash {
+  animation: message-flash 2.4s ease-out;
+}
+
+@keyframes message-flash {
+  0% { background: var(--accent-soft); }
+  70% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}

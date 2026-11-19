@@ -10,10 +10,11 @@ This repository provides a standalone native WeChat daemon, Rust CLI and OpenCla
 | `packages/shared/` | Private native TypeScript HTTP/SSE SDK and generated Rust contracts |
 | `packages/cli/` | npm `wx` launcher and verified executable installer |
 | `packages/openclaw-extension/` | OpenClaw native hosting, event custody, model handoff and media |
+| `wechat-ui/` | React chat interface for the daemon's `/ui/` page and the desktop app; standalone npm project, not a workspace package |
 | `deploy/native/` | Native-only image, Compose and optional user-service examples |
 | `docs/` | Public documentation site |
 
-Native routes/contracts live in `packages/native-client-rust/crates/wechat-api/`; run `pnpm generate-types` after exported Rust contract changes. The README is a concise user guide, not an exhaustive API specification. The former UI server, image, container CLI and Wechaty integrations are retired; Git history retains their implementation.
+Native routes/contracts live in `packages/native-client-rust/crates/wechat-api/`; run `pnpm generate-types` after exported Rust contract changes. The README is a concise user guide, not an exhaustive API specification. `wechat-ui/` has its own lockfile and builds with `npm`; the daemon hosts its production bundle at `/ui/` and the desktop app bundles the same build. The former UI server, image, container CLI and Wechaty integrations are retired; Git history retains their implementation.
 
 ## Working rules
 
@@ -24,7 +25,7 @@ Native routes/contracts live in `packages/native-client-rust/crates/wechat-api/`
 - Preserve existing container data, official profiles and backups unless removal is explicitly requested. Retiring runtime source does not authorize deleting deployed containers, registry tags or volumes.
 - Use one writer per official profile. Stop the official app before takeover; a caller assertion is not proof that an unmanaged app stopped. Do not infer arbitrary official-build or live ARM64 compatibility from synthetic tests.
 - Add a changeset for user-facing behavior or package changes. Documentation-only edits do not need one.
-- UI text lives in `packages/client-ui/locales/en.json` and is shown with `t()`; docs are written in English under `docs/src/content/docs/`. Change only the English: translations, `<lang>.meta.json` and `sourceHash` are maintained by translators and the translation bot (see `docs/src/content/docs/reference/translate.mdx`). Run `pnpm i18n check` after changing UI text or docs.
+- UI text is written as the source string passed to `t()` in `wechat-ui/src/`; English translations live in `wechat-ui/src/i18n/dict/en/`. Docs are written in English under `docs/src/content/docs/`. Change only the English: translations, `<lang>.meta.json` and `sourceHash` are maintained by translators and the translation bot (see `docs/src/content/docs/reference/translate.mdx`). Run `pnpm i18n check` after changing docs.
 - Every PR must run `pnpm interfaces` and commit the result; see [Public interfaces](#public-interfaces).
 - Follow the official client's verified implementation and storage for existing WeChat features. Settled message/contact/group state belongs in the supported official profile; read or derive it there instead of creating a parallel settled-state model in a sidecar. Sidecars may track pending work, raw receipts, deduplication, idempotency and recovery. Keep those operational records separate from canonical state and document why each is needed. An API may derive additional information from existing evidence without persisting a second copy. Treat behavior or retention beyond the official client as a separate proposed feature, state that difference, and obtain user agreement before implementing it. Missing or incomplete analysis is not evidence that extra storage is necessary.
 
@@ -36,7 +37,7 @@ Native routes/contracts live in `packages/native-client-rust/crates/wechat-api/`
 - Give every new command, flag, public item, tool parameter and config key help text, a doc comment or a description. A new `MISSING` row fails the Interface docs check.
 - Change the account or registry schema only through a new migration and schema version. Never edit an existing migration.
 - In the PR description, name the interface changes and anything the review comment flags as breaking.
-- UI changes are reviewed visually: CI uploads every scene to Argos, and the owner approves the changes there. Add or update a scene in `packages/client-ui/scenes/` when you add or change a screen. Never approve Argos changes yourself.
+- UI changes are reviewed visually: CI uploads every scene to Argos, and the owner approves the changes there. Add or update a scene in `wechat-ui/scenes/` when you add or change a screen. Never approve Argos changes yourself.
 - A PR that changes `interfaces/` needs the owner's `interfaces-approved` label. Never add that label yourself, and never merge while the Interface approval check is pending or failing.
 
 ## Documentation site
@@ -135,3 +136,13 @@ pnpm interfaces --check
 Use `pnpm generate-types` after changing exported Rust types. CI runs tests and builds independently on native x64/ARM64 Linux workers. Prefer CI or an already configured remote builder for release/image builds; do not require local cross-compilers. Build images with `pnpm build:image:amd64` or `pnpm build:image:arm64` on a suitable worker. Builds never authorize deployment. For end-to-end changes, test the built image and CLI against an isolated container in addition to unit tests. The public CLI entry point is `wx`; `pnpm cli` runs the local build.
 
 For user-facing changes, add a `.changeset/*.md` file with the affected package and appropriate patch/minor/major bump. Keep package docs and README commands aligned with the shipped CLI. Do not document stubs, unverified behavior, or planned features as working.
+
+## Build cache hygiene
+
+All Rust build artifacts live in `packages/native-client-rust/target/`. Reuse them across sessions; artifacts accumulate when builds scatter across directories, profiles or toolchains.
+
+- Always run cargo against the workspace manifest (`--manifest-path packages/native-client-rust/Cargo.toml`, or from that directory) so every session shares one `target/`. Never set `CARGO_TARGET_DIR` to another location or build from a copy of the workspace.
+- Never run `cargo clean` or delete `target/` without an explicit user request. Cargo fingerprints inputs and reuses unchanged artifacts; wiping only costs a full rebuild and multiplies disk use.
+- Stick to the profiles already in use: default debug for checks and tests, `cargo build --release -p wx-native` for the deployable binary. Extra profiles and `--target <triple>` directories duplicate artifacts.
+- Use the pinned toolchain (`rust-toolchain.toml`) for every command; a different rustc version invalidates the cache and re-accumulates artifacts.
+- When disk space must be reclaimed, clean narrowly and report what was removed: prefer `cargo clean -p <package>`, or delete only `target/release/incremental` and stale `target/<triple>` directories, instead of wiping `target/`.

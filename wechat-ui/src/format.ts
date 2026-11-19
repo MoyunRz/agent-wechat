@@ -1,4 +1,10 @@
+import { getLocale } from './i18n'
 import type { Contact, Message, Thread } from './types'
+
+/** Locale for date and time formatting, following the interface language. */
+function dateLocale(): string {
+  return getLocale() === 'en' ? 'en-US' : 'zh-CN'
+}
 
 export function initials(value: string | null | undefined): string {
   const text = value?.trim() ?? ''
@@ -124,7 +130,7 @@ export function formatClock(value: string | null | undefined): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime()))
     return ''
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })
 }
 
 export function formatListTime(value: string | null | undefined): string {
@@ -168,7 +174,7 @@ export function dayLabel(value: string | null | undefined): string {
   yesterday.setDate(now.getDate() - 1)
   if (date.toDateString() === yesterday.toDateString())
     return '昨天'
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleDateString(dateLocale(), {
     year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric',
     month: 'long',
     day: 'numeric',

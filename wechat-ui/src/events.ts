@@ -1,4 +1,5 @@
 import { authHeaders, wechatApi } from './api'
+import { fetchWithTransport } from './platform/transport'
 import type { WechatEvent } from './types'
 
 type EventStreamOptions = {
@@ -77,7 +78,7 @@ export async function consumeEventStream(options: EventStreamOptions): Promise<v
     `/accounts/${encodeURIComponent(options.accountId)}/events/stream${query ? `?${query}` : ''}`,
   )
 
-  const response = await fetch(url, {
+  const response = await fetchWithTransport(url, {
     cache: 'no-store',
     credentials: 'same-origin',
     headers: { Accept: 'text/event-stream', ...authHeaders() },

@@ -146,7 +146,7 @@ pub struct Account {
 }
 
 /// The `registry.sqlite` schema version after every migration.
-const REGISTRY_SCHEMA_VERSION: i64 = 6;
+const REGISTRY_SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     pub root: PathBuf,
@@ -245,6 +245,9 @@ impl Store {
             db.execute_batch(include_str!(
                 "../migrations/registry/V006__openclaw_configs.sql"
             ))?;
+        }
+        if version < 7 {
+            db.execute_batch(include_str!("../migrations/registry/V007__ai_config.sql"))?;
         }
         let server_id = db.query_row(
             "SELECT value FROM metadata WHERE key='server_id'",

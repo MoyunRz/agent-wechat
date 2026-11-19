@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::LazyLock};
 
 // Shared with the webview; these are display approximations, never send data.
-const ALIASES: &str = include_str!("../../../client-ui/src/emoji-aliases.json");
+const ALIASES: &str = include_str!("../../../../wechat-ui/src/emoji-aliases.json");
 struct Catalog {
     brackets: HashMap<String, String>,
     slashes: Vec<(String, String)>,
@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn display_cases_match_the_webview() {
         let cases: Vec<[String; 2]> = serde_json::from_str(include_str!(
-            "../../../client-ui/test/fixtures/emoji-text.json"
+            "../../../../wechat-ui/test/fixtures/emoji-text.json"
         ))
         .unwrap();
         for [input, expected] in cases {

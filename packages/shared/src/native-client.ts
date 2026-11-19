@@ -139,6 +139,11 @@ export class NativeWeChatClient {
     if (key != null && (!key || key.length > 200 || /[\r\n]/.test(key))) throw new Error("Invalid login idempotency key");
     return this.request(`v1/accounts/${id(accountId)}/auth/login`, { method: "POST", headers: key ? { "Idempotency-Key": key } : undefined, body: JSON.stringify(options) });
   }
+  /** Start signing in without choosing an account; the daemon routes the login to the matching account on success. */
+  loginUnbound(options: NativeLoginOptions = {}, key?: string): Promise<NativeOperation> {
+    if (key != null && (!key || key.length > 200 || /[\r\n]/.test(key))) throw new Error("Invalid login idempotency key");
+    return this.request("v1/login-attempts", { method: "POST", headers: key ? { "Idempotency-Key": key } : undefined, body: JSON.stringify(options) });
+  }
   operation(accountId: string, operationId: string, signal?: AbortSignal): Promise<NativeOperation> { return this.request(`v1/accounts/${id(accountId)}/operations/${id(operationId)}`, { signal }); }
   /** Submit once with a stable key; inspect the returned operation after uncertainty. */
   async recallMessage(accountId: string, messageId: string, serverId: string, idempotencyKey: string, signal?: AbortSignal): Promise<NativeOperation> {

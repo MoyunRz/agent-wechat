@@ -592,3 +592,12 @@ test('media batch fallback probes an older hub once and keeps ordinary GET suppo
   assert.equal(probes, 1);
   assert.equal(gets, 3);
 });
+
+test('unbound login posts to the account-less endpoint with the idempotency key', async () => {
+  const calls = [];
+  const client = new NativeWeChatClient({ ...options, fetch: async (url, init) => { calls.push([new URL(url).pathname, init.method, init.headers.get('Idempotency-Key'), JSON.parse(init.body)]); return Response.json({ id: 'op', accountId: 'pending-login-x', kind: 'login', state: 'starting', result: {} }); } });
+  const operation = await client.loginUnbound({ strategy: 'qr' }, 'login-key');
+  assert.equal(operation.accountId, 'pending-login-x');
+  assert.deepEqual(calls, [['/v1/login-attempts', 'POST', 'login-key', { strategy: 'qr' }]]);
+  assert.throws(() => client.loginUnbound({}, 'bad\nkey'), /Invalid login idempotency key/);
+});

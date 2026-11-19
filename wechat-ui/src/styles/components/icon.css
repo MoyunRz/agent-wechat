@@ -1,0 +1,3 @@
+/* The icon component draws with inline SVG presentation attributes and had no
+   scoped styles in the Vue source, so this file carries no rules. It exists so
+   every component imports its own stylesheet. */

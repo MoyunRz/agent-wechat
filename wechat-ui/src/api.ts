@@ -21,6 +21,7 @@ import type {
   TextMentions,
   Thread,
 } from './types'
+import { fetchWithTransport, transportProvidesAuth } from './platform/transport'
 
 export class WechatApiError extends Error {
   readonly status: number
@@ -65,9 +66,12 @@ function hubAuthToken(): string {
   }
 }
 
-/** Whether the hub token is available (same-origin standalone mode). */
+/**
+ * Whether hub credentials are available: the same-origin standalone token, or a
+ * desktop transport that attaches its own credentials.
+ */
 export function hasHubAuth(): boolean {
-  return hubAuthToken().trim() !== ''
+  return transportProvidesAuth() || hubAuthToken().trim() !== ''
 }
 
 function resolveClientBase(): string {
@@ -112,6 +116,11 @@ const CODE_MESSAGES: Record<string, string> = {
   not_found: '任务或资源不存在。',
   operation_failed: '微信操作失败，请稍后重试。',
   operation_in_progress: '操作正在进行中，请稍后重试。',
+  too_many_pending_logins: '并行的登录尝试过多，请稍候重试。',
+  ai_not_configured: '请先在右上角设置里配置 AI 服务与模型。',
+  ai_upstream_error: 'AI 服务暂时不可用或返回了错误，请稍后重试。',
+  invalid_ai_base_url: 'AI 服务地址无效，需以 http(s):// 开头。',
+  invalid_ai_model: '模型名无效。',
   media_expired: '媒体资源已过期。',
   unsupported: '当前媒体类型不受支持。',
   mention_member_unavailable: '@ 的成员不在群成员列表中，请稍后重试。',
@@ -166,7 +175,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   const { headers: extraHeaders, ...rest } = init
   try {
-    response = await fetch(apiUrl(path), {
+    response = await fetchWithTransport(apiUrl(path), {
       cache: 'no-store',
       credentials: 'same-origin',
       ...rest,
@@ -210,6 +219,39 @@ export function newIdempotencyKey(prefix: string): string {
 
 function enc(value: string): string {
   return encodeURIComponent(value)
+}
+
+/** daemon 全局 AI 助手配置（读取态）；API key 永不回传，只有 keyConfigured。 */
+export type AiConfig = {
+  baseUrl: string
+  models: string[]
+  model: string
+  /** 思考程度（minimal/low/medium/high）；空=请求不带 reasoning_effort。 */
+  reasoning: string
+  keyConfigured: boolean
+  updatedAt: number | null
+}
+
+/** AI 助手配置写入体；apiKey 缺省/为空时 daemon 保留已存的 key。 */
+export type AiConfigInput = {
+  baseUrl: string
+  apiKey?: string
+  models: string[]
+  model: string
+  /** 思考程度；缺省为空（不发送 reasoning_effort）。 */
+  reasoning?: string
+}
+
+/** 登录 attempt 请求体：绑定槽位与免选槽位两条链路共用，幂等哈希才能对齐。 */
+function loginAttemptBody(): Record<string, unknown> {
+  return {
+    strategy: 'auto',
+    qrRefresh: { mode: 'auto', maxRefreshes: 3 },
+    allowQr: true,
+    forceQr: false,
+    timeoutSeconds: 300,
+    computerName: 'Vane',
+  }
 }
 
 // 头像 blob 内存缓存：key 为 `accountId|username|version|epoch`；头像字节很小（~10KB 级），
@@ -270,19 +312,70 @@ export const wechatApi = {
     return jsonRequest(`/accounts/${enc(accountId)}/openclaw-config`, 'PUT', { config })
   },
 
+  /** 读取该微信账号的 AI 助手配置；API key 永不回传，只有 keyConfigured。 */
+  getAiConfig(accountId: string): Promise<AiConfig> {
+    return request(`/accounts/${enc(accountId)}/ai/config`)
+  },
+
+  /** 保存该微信账号的 AI 助手配置；apiKey 缺省/为空时保留已存的 key。 */
+  saveAiConfig(accountId: string, input: AiConfigInput): Promise<{ updatedAt: number }> {
+    return jsonRequest(`/accounts/${enc(accountId)}/ai/config`, 'PUT', input)
+  },
+
+  /** 从 provider 拉取模型目录，返回排序去重后的模型 id 列表。 */
+  refreshAiModels(accountId: string): Promise<{ models: string[] }> {
+    return request(`/accounts/${enc(accountId)}/ai/models`, { method: 'POST' })
+  },
+
+  /**
+   * 发起 OpenAI 兼容的 chat completion 请求（走该账号的配置），返回原始
+   * Response 供调用方解析 SSE 流。错误时与其它方法一样抛 WechatApiError。
+   */
+  async aiChatCompletions(
+    accountId: string,
+    body: Record<string, unknown>,
+  ): Promise<Response> {
+    const response = await fetchWithTransport(apiUrl(`/accounts/${enc(accountId)}/ai/chat/completions`), {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok)
+      throw await readError(response)
+    return response
+  },
+
   createLoginAttempt(accountId: string, key = idempotencyKey('login')): Promise<LoginAttempt> {
     return jsonRequest<LoginAttempt>(
       `/accounts/${enc(accountId)}/login-attempts`,
       'POST',
-      {
-        strategy: 'auto',
-        qrRefresh: { mode: 'auto', maxRefreshes: 3 },
-        allowQr: true,
-        forceQr: false,
-        timeoutSeconds: 300,
-        computerName: 'Vane',
-      },
+      loginAttemptBody(),
       { 'Idempotency-Key': key },
+    )
+  },
+
+  /**
+   * 不选槽位直接发起登录：daemon 建临时槽位出码，扫码成功后按身份自动
+   * 归位（已有槽位则搬过去，全新身份则保留临时槽位）。用返回 operation 的
+   * `accountId`（临时槽位 id）继续轮询/取码/取消。
+   */
+  createUnboundLoginAttempt(key = idempotencyKey('login')): Promise<LoginAttempt> {
+    return jsonRequest<LoginAttempt>(
+      '/login-attempts',
+      'POST',
+      loginAttemptBody(),
+      { 'Idempotency-Key': key },
+    )
+  },
+
+  /** 删除账号（释放扫码直登留下的临时槽位等）；需二次确认 id。 */
+  removeAccount(accountId: string): Promise<unknown> {
+    return jsonRequest(
+      `/accounts/${enc(accountId)}`,
+      'DELETE',
+      { confirmAccountId: accountId },
     )
   },
 
@@ -302,7 +395,7 @@ export const wechatApi = {
   async loadLoginQr(accountId: string, attemptId: string, generation = 0): Promise<string> {
     // 二维码以 <img> 展示，而 <img> 无法携带 Authorization 头；
     // 改为带鉴权取回字节，再以 object URL 交给图片元素。
-    const response = await fetch(apiUrl(`/accounts/${enc(accountId)}/login-attempts/${enc(attemptId)}/qr?generation=${String(generation)}`), {
+    const response = await fetchWithTransport(apiUrl(`/accounts/${enc(accountId)}/login-attempts/${enc(attemptId)}/qr?generation=${String(generation)}`), {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { ...authHeaders() },
@@ -445,7 +538,7 @@ export const wechatApi = {
     form.append('file', file, file.name)
     let response: Response
     try {
-      response = await fetch(apiUrl(`/accounts/${enc(accountId)}/uploads`), {
+      response = await fetchWithTransport(apiUrl(`/accounts/${enc(accountId)}/uploads`), {
         method: 'POST',
         body: form,
         cache: 'no-store',
@@ -588,7 +681,7 @@ export const wechatApi = {
     return request<SendIntent>(`/sends/${enc(sendId)}`)
   },
 
-  markThreadRead(accountId: string, threadId: string, expectedVersion: string): Promise<unknown> {
+  markThreadRead(accountId: string, threadId: string, expectedVersion: string): Promise<{ version?: string }> {
     return jsonRequest(
       `/accounts/${enc(accountId)}/threads/${enc(threadId)}/read-state`,
       'POST',
@@ -608,7 +701,7 @@ export const wechatApi = {
   /** 头像以 <img> 展示，而 <img> 无法携带 Authorization 头；带鉴权取回字节转为 object URL。 */
   async loadAvatar(accountId: string, username: string, version = 0): Promise<string | null> {
     const query = version ? `?v=${version}` : ''
-    const response = await fetch(apiUrl(`/accounts/${enc(accountId)}/avatars/${enc(username)}${query}`), {
+    const response = await fetchWithTransport(apiUrl(`/accounts/${enc(accountId)}/avatars/${enc(username)}${query}`), {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { ...authHeaders() },
@@ -667,7 +760,7 @@ export const wechatApi = {
     const url = wechatApi.mediaUrl(value)
     if (!url)
       return null
-    const response = await fetch(url, {
+    const response = await fetchWithTransport(url, {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { ...authHeaders() },
@@ -728,7 +821,7 @@ export const wechatApi = {
   /** 请求 vane-core 用系统默认浏览器打开外部链接（仅允许 http/https）。 */
   async openExternalUrl(url: string): Promise<void> {
     const sessionBase = CLIENT_BASE.replace(/\/client\/v1$/, '')
-    const response = await fetch(`${sessionBase}/client/open-url`, {
+    const response = await fetchWithTransport(`${sessionBase}/client/open-url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',

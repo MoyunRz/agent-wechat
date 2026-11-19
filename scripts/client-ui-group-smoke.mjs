@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { GroupMutations } from "../packages/client-ui/src/group-creation.ts";
+import { GroupMutations } from "./client-support/group-creation.ts";
 export async function groupJourney({ client, wait, account, control, state }) {
   const capability = await client.capabilities(account);
   assert.ok(capability.groupMutations.includes("create"));

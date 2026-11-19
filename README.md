@@ -205,12 +205,14 @@ Try the client with synthetic accounts and media, without connecting to WeChat:
 
 ```bash
 pnpm install --frozen-lockfile
+npm --prefix wechat-ui ci
 pnpm client:dev
 ```
 
-See the [client preview guide](packages/client-ui/README.md) and
+The single React interface in [wechat-ui](wechat-ui/README.md) serves both the
+desktop app and the daemon's `/ui/` page. See the
 [simulator guide](packages/native-client-rust/crates/wechat-simulator/README.md)
-for prerequisites and scenario controls. To build and test changes, start with
+for scenario controls. To build and test changes, start with
 [AGENTS.md](AGENTS.md) and the
 [build guide](https://thisnick.github.io/agent-wechat/reference/build/).
 

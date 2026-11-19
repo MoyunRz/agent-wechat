@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { MediaOutbox } from "../packages/client-ui/src/media-outbox.ts";
+import { MediaOutbox } from "./client-support/media-outbox.ts";
 
 export async function mediaJourney({ client, control, wait, state, account }) {
   assert.equal(

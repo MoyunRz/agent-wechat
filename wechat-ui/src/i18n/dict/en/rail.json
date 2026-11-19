@@ -1,0 +1,22 @@
+{
+  "微信": "WeChat",
+  "账号信息": "Account information",
+  "聊天": "Chats",
+  "通讯录": "Contacts",
+  "AI 对话": "AI Chat",
+  "界面设置": "Interface settings",
+  "关闭": "Close",
+  "尚未登录": "Not signed in",
+  "未登录": "Not signed in",
+  "连接状态": "Connection status",
+  "会话模式": "Session mode",
+  "独立 Hub": "Standalone hub",
+  "离线调试模式": "Offline debug mode",
+  "已开启 · 只读本地缓存": "On · reads the local cache only",
+  "未开启": "Off",
+  "刷新账号状态": "Refresh account status",
+  "退出登录": "Sign out",
+  "已连接": "Connected",
+  "连接中": "Connecting",
+  "离线": "Offline"
+}

@@ -1,11 +1,7 @@
 //! Original type-47 bytes from the verified CDN host. Signed URLs remain private.
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    io::Read,
-    net::{IpAddr, ToSocketAddrs},
-    time::Duration,
-};
+use std::{io::Read, net::IpAddr, time::Duration};
 pub use wechat_media::{inspect_image, ImageInspection};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StickerDescriptor {
@@ -81,10 +77,7 @@ pub fn fetch_sticker(
         .host_str()
         .ok_or_else(|| anyhow::anyhow!("sticker_source_not_allowed"))?;
     let port = if url.scheme() == "https" { 443 } else { 80 };
-    let addresses = (host, port)
-        .to_socket_addrs()
-        .map_err(|_| anyhow::anyhow!("sticker_dns_failed"))?
-        .collect::<Vec<_>>();
+    let addresses = crate::resolve::resolve(host, port)?;
     ensure!(
         !addresses.is_empty()
             && addresses.len() <= 64

@@ -13,9 +13,6 @@
     "prepare:sidecars": "node scripts/prepare-sidecars.mjs",
     "test": "node --test test/*.test.mjs"
   },
-  "dependencies": {
-    "@agent-wechat/client-ui": "workspace:*"
-  },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"
   }

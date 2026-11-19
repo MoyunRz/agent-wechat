@@ -1,6 +1,6 @@
 export type ThreadFilter = 'all' | 'unread' | 'direct' | 'groups' | 'mini' | 'official'
 
-export type RailView = 'chats' | 'contacts' | 'openclaw'
+export type RailView = 'chats' | 'contacts' | 'ai'
 
 export type ThemeMode = 'dark' | 'light'
 
@@ -310,6 +310,15 @@ export type LoginAttempt = {
     lanChallenge?: unknown
     qrAvailable?: boolean
     qrGeneration?: number
+    /** 扫码成功后 daemon 自动归位到的既有账号槽位 id；未发生归位（含字段缺省）时为 null。 */
+    adoptedAccountId?: string | null
+    /** 归位失败时 daemon 指出的原槽位 id（needs_slot_login）。 */
+    accountId?: string | null
+    /** 终态失败原因（daemon `login_worker` 写入，成功时为空）。 */
+    code?: string | null
+    reason?: string | null
+    hint?: string | null
+    serviceCode?: number | null
   }
   createdAt: string
   updatedAt: string

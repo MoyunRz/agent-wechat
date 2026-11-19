@@ -1,0 +1,18 @@
+{
+  "输入消息": "Enter a message",
+  "发消息给 {name}": "Send a message to {name}",
+  "取消引用": "Cancel quote",
+  "移除附件": "Remove attachment",
+  "黄豆表情": "Emoji",
+  "收起": "Collapse",
+  "成员加载中…": "Loading members…",
+  "没有匹配的成员": "No matching members",
+  "全体成员": "All members",
+  "发送图片、视频或语音": "Send an image, video or voice message",
+  "提及群成员": "Mention a group member",
+  "群聊中可提及成员": "Mentions are available in group chats",
+  "Enter 发送 · Shift + Enter 换行": "Enter to send · Shift + Enter for a new line",
+  "发送中": "Sending",
+  "发送 (Enter)": "Send (Enter)",
+  "发送": "Send"
+}

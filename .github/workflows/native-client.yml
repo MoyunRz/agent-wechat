@@ -19,7 +19,8 @@ on:
       - 'scripts/native-cli-conference-smoke.*'
       - 'packages/openclaw-extension/src/calls*'
       - 'scripts/client-ui*-smoke.mjs'
-      - 'packages/client-ui/**'
+      - 'scripts/client-support/**'
+      - 'wechat-ui/**'
       - '.node-version'
       - 'pnpm-lock.yaml'
       - 'scripts/native-ci-cache-key*.py'
@@ -162,7 +163,11 @@ jobs:
       - name: Install browser-client test dependencies
         if: matrix.suite == 'test' && (github.event_name == 'pull_request' || inputs.simulator_checks) && (runner.arch == 'X64' || github.event_name != 'pull_request')
         working-directory: .
-        run: pnpm install --frozen-lockfile --filter @agent-wechat/client-ui... --filter @agent-wechat/agent-wechat...
+        run: pnpm install --frozen-lockfile --filter @agent-wechat/shared... --filter @agent-wechat/agent-wechat...
+      - name: Install the chat interface dependencies
+        if: matrix.suite == 'test' && (github.event_name == 'pull_request' || inputs.simulator_checks) && (runner.arch == 'X64' || github.event_name != 'pull_request')
+        working-directory: .
+        run: npm ci --prefix wechat-ui
       - name: Exercise the connected session and UI launcher with synthetic accounts
         if: matrix.suite == 'test' && (github.event_name == 'pull_request' || inputs.simulator_checks) && (runner.arch == 'X64' || github.event_name != 'pull_request')
         working-directory: .

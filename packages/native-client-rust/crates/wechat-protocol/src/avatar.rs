@@ -1,6 +1,5 @@
 //! Exact server-advertised avatar sources, with bounded pinned public DNS.
 use super::*;
-use std::net::ToSocketAddrs;
 pub fn validate_avatar_url(value: &str) -> Result<reqwest::Url> {
     let u = reqwest::Url::parse(value).map_err(|_| anyhow::anyhow!("avatar_source_invalid"))?;
     ensure!(
@@ -24,10 +23,7 @@ pub fn download_advertised_avatar(value: &str) -> Result<Vec<u8>> {
     let url = validate_avatar_url(value)?;
     let host = url.host_str().unwrap().to_string();
     let port = url.port_or_known_default().unwrap();
-    let addresses = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|_| anyhow::anyhow!("avatar_dns_failed"))?
-        .collect::<Vec<_>>();
+    let addresses = crate::resolve::resolve(&host, port)?;
     ensure!(
         !addresses.is_empty()
             && addresses.len() <= 64

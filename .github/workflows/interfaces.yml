@@ -34,7 +34,7 @@ jobs:
               - 'scripts/native-crates.mjs'
               - 'packages/native-client-rust/**'
               - 'packages/openclaw-extension/**'
-              - 'packages/client-ui/**'
+              - 'wechat-ui/**'
               - 'packages/shared/**'
               - 'docs/src/content/docs/openclaw/tools.mdx'
               - 'rust-toolchain.toml'
@@ -93,7 +93,7 @@ jobs:
         with:
           node-version-file: .node-version
       - name: Test the review tool
-        run: node --test scripts/interfaces/review.test.mjs scripts/interfaces/index.test.mjs scripts/interfaces/publish-comment.test.mjs
+        run: node --test scripts/interfaces/review.test.mjs scripts/interfaces/index.test.mjs scripts/interfaces/publish-comment.test.mjs scripts/interfaces/ui-listing.test.mjs
       - name: Check OpenAPI compatibility with oasdiff
         id: oasdiff
         run: |

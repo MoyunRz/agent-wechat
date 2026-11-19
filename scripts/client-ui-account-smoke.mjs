@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { connect } from "../packages/client-ui/src/connection.ts";
+import { connect } from "./client-support/connection.ts";
 
 export async function accountJourney({
   client,

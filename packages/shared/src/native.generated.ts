@@ -762,7 +762,12 @@ url: string | null,
  * Name of the site or account that published the card, such as a Channels account. Null when
  * there is none.
  */
-sourceName: string | null, };
+sourceName: string | null, 
+/**
+ * Length of a Channels video in seconds. Omitted for other cards and when the card does not
+ * say.
+ */
+durationSeconds?: number, };
 export type LocationCoordinateSystem = "unknown";
 export type LocationCard = { 
 /**
@@ -1408,7 +1413,12 @@ export type AccountSettings = {
  * from 0 to 536870912. Thumbnails and voice notes are always downloaded, and 0 limits
  * automatic downloads to those; the default is 52428800.
  */
-autoDownloadMaxBytes: number, };
+autoDownloadMaxBytes: number, 
+/**
+ * Which message kinds arrive already downloaded and cached. Every kind is on by default.
+ * A request that omits this keeps the kinds the account already has.
+ */
+proactiveCache: ProactiveCacheKinds | null, };
 export type NativeAccountRemovalRequest = { 
 /**
  * Must repeat the account ID from the URL, to confirm the removal.
@@ -1683,7 +1693,11 @@ durationMs: number | null,
 /**
  * How to send a video, `normal` by default or `original`. Only valid for video sends.
  */
-videoQuality?: VideoSendQuality, };
+videoQuality?: VideoSendQuality, 
+/**
+ * How to send an image, `standard` by default or `original`. Only valid for image sends.
+ */
+imageQuality?: ImageSendQuality, };
 export type MediaImagePreview = { 
 /**
  * SHA-256 of the original image bytes this preview was made from.

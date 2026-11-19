@@ -1,0 +1,570 @@
+/*
+ * Settings popover and the category modal: the directory rows, the category
+ * bodies (appearance, bubbles, notifications, account, media cache) and the
+ * in-app purge confirmation. Ported from the Vue scoped style block with
+ * identical class names and values.
+ */
+
+/* The settings popover is 5% wider to fit the longer setting labels. The
+   compound selector keeps the override independent of stylesheet order now
+   that the scoped styles are global. */
+.rail-popover.settings-popover {
+  width: 271px;
+}
+
+.settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-head strong {
+  font-size: 13px;
+}
+
+.settings-head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 13px;
+}
+
+.settings-label {
+  color: var(--text-soft);
+  font-size: 11.5px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle-switch .toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-soft);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.toggle-switch.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.toggle-switch.on .toggle-knob {
+  transform: translateX(14px);
+  background: var(--accent);
+}
+
+.mode-switch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+}
+
+.mode-switch button {
+  flex: 1;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.mode-switch button.active {
+  background: var(--panel-elevated);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.bubble-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bubble-color-label {
+  flex: 0 0 24px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bubble-color-controls {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bubble-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.bubble-swatch:hover {
+  transform: scale(1.08);
+}
+
+.bubble-swatch.active {
+  border-color: var(--text);
+}
+
+.custom-color {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  border-radius: 50%;
+  background: conic-gradient(#f43f5e, #f97316, #22c55e, #2f7cf6, #8b5cf6, #f43f5e);
+  cursor: pointer;
+}
+
+.custom-color-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+}
+
+.custom-color input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.color-auto {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.color-auto.active {
+  border-color: var(--accent);
+  background: var(--accent-faint);
+  color: var(--text);
+}
+
+.settings-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-value[data-tone="online"] {
+  color: var(--success-text);
+}
+
+.settings-value[data-tone="pending"] {
+  color: var(--warning);
+}
+
+.settings-value[data-tone="offline"] {
+  color: var(--muted);
+}
+
+.settings-value .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.theme-grid {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.theme-swatch {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.theme-swatch:hover {
+  transform: scale(1.08);
+}
+
+.theme-swatch.active {
+  border-color: var(--text);
+}
+
+.font-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* Media cache: the proactive-cache switch rows and the purge button grid. */
+.cache-kind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -3px;
+  padding: 2px;
+  border-radius: 10px;
+}
+
+.cache-kind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.14s ease, opacity 0.14s ease;
+}
+
+.cache-kind-row:hover,
+.cache-kind-row:focus-visible {
+  background: var(--panel-hover);
+  outline: none;
+}
+
+.cache-kind-row.saving {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.cache-kind-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cache-kind-name {
+  color: var(--text-soft);
+  font-size: 11.5px;
+}
+
+.cache-kind-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.cache-error {
+  color: var(--danger-text, #f87171);
+  font-size: 10.5px;
+}
+
+.cache-purge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.cache-purge-btn {
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text-soft);
+  font-size: 11px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cache-purge-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger-text, #f87171) 35%, transparent);
+  color: var(--danger-text, #f87171);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.cache-purge-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.cache-purge-result {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+/* ----- Settings directory and category modal ----- */
+.settings-directory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+}
+
+.directory-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-row:hover {
+  background: var(--panel-hover);
+}
+
+.directory-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--accent);
+}
+
+.directory-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.directory-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.directory-hint {
+  overflow: hidden;
+  color: var(--muted-soft);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-chevron {
+  flex: 0 0 auto;
+  color: var(--muted-soft);
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 12, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.settings-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(430px, 100%);
+  max-height: min(640px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--popover-bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.settings-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-modal-head strong {
+  display: block;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.settings-modal-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-soft);
+  font-size: 11.5px;
+}
+
+.settings-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  overflow: auto;
+}
+
+/* ----- Purge confirmation: layered above the settings modal ----- */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 12, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.confirm-card {
+  width: min(360px, 100%);
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--popover-bg);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  animation: confirm-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-card {
+    animation: none;
+  }
+}
+
+.confirm-card h4 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.confirm-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirm-cancel {
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  transition: background 0.15s ease;
+}
+
+.confirm-cancel:hover {
+  background: var(--panel-hover);
+}
+
+.confirm-danger {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(248, 113, 113, 0.16);
+  color: var(--danger-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.confirm-danger:hover {
+  background: rgba(248, 113, 113, 0.26);
+}
+
+/* The Vue <Transition name="fade"> around the category modal is replaced by
+   data-phase, matching the original 0.16s opacity transition. The transition
+   lives on the resting rule so the change back to the idle phase animates. */
+.settings-overlay {
+  transition: opacity 0.16s ease;
+}
+
+.settings-overlay[data-phase='enter'],
+.settings-overlay[data-phase='leave'] {
+  opacity: 0;
+}

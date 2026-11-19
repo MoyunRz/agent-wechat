@@ -432,6 +432,11 @@ impl From<anyhow::Error> for ApiError {
                 "operation_in_progress",
             ),
             (
+                "too_many_pending_logins",
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_pending_logins",
+            ),
+            (
                 "login_challenge_unavailable",
                 StatusCode::NOT_FOUND,
                 "login_challenge_unavailable",
@@ -665,7 +670,27 @@ async fn login(
     Ok((
         StatusCode::ACCEPTED,
         checked::<contracts::NativeOperation>(
-            serde_json::to_value(app.core.login_keyed(&a, input, key).await?)
+            serde_json::to_value(app.core.login_keyed(&a, input, key, false).await?)
+                .map_err(anyhow::Error::from)?,
+        )?,
+    ))
+}
+async fn login_unbound(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    headers: HeaderMap,
+    Json(input): Json<LoginRequest>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    c.require(None, "login")?;
+    let key = if headers.contains_key("idempotency-key") {
+        Some(idempotency_key(&headers)?)
+    } else {
+        None
+    };
+    Ok((
+        StatusCode::ACCEPTED,
+        checked::<contracts::NativeOperation>(
+            serde_json::to_value(app.core.login_unbound(input, key).await?)
                 .map_err(anyhow::Error::from)?,
         )?,
     ))
@@ -1288,6 +1313,7 @@ pub fn router(core: Arc<Core>, token: &str) -> Router {
             axum::routing::delete(revoke_token),
         )
         .api_route("/v1/accounts", get(accounts).post(create_account))
+        .api_route("/v1/login-attempts", post(login_unbound))
         .api_route("/v1/profiles/official", post(prepare_official_profile))
         .api_route(
             "/v1/accounts/{a}",

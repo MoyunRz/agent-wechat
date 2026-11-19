@@ -6,7 +6,7 @@ stream. An injected upstream adapter exchanges local JSON with a separate Rust
 scenario service. The scenario service owns a separate SQLite database.
 
 This command provides an API/SDK development environment. For the connected
-browser preview, use `pnpm client:dev`; see [the client preview guide](client-ui.md).
+browser preview, use `pnpm client:dev`; see [the chat interface guide](../../../../wechat-ui/README.md).
 Production web hosting and the Tauri shell remain follow-up work.
 
 ## Start

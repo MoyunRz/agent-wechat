@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'packages/**'
+      - 'wechat-ui/**'
       - 'docs/**'
       - '.node-version'
       - 'pnpm-lock.yaml'
@@ -18,7 +19,8 @@ on:
       - '.github/workflows/native-image.yml'
       - '.github/workflows/native-distribution.yml'
       - '.github/workflows/desktop.yml'
-      - 'scripts/client-ui-smoke.mjs'
+      - 'scripts/client-ui*-smoke.mjs'
+      - 'scripts/client-support/**'
       - 'scripts/i18n/**'
       - 'scripts/native-release-notes*.mjs'
       - 'scripts/native-release-policy*.mjs'
@@ -87,8 +89,9 @@ jobs:
               - 'packages/desktop/**'
               - 'packages/cli/**'
               - 'packages/shared/**'
-              - 'packages/client-ui/**'
-              - 'scripts/client-ui-smoke.mjs'
+              - 'wechat-ui/**'
+              - 'scripts/client-ui*-smoke.mjs'
+              - 'scripts/client-support/**'
               - 'scripts/i18n/**'
               - 'packages/openclaw-extension/**'
               - '.node-version'
@@ -153,6 +156,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install the chat interface dependencies
+        run: npm ci --prefix wechat-ui
+
       - name: Build
         run: pnpm build
 
@@ -161,6 +167,12 @@ jobs:
 
       - name: Test (all packages)
         run: pnpm -r --if-present test
+
+      - name: Build and test the chat interface
+        run: |
+          node --test wechat-ui/scenes/listing.test.mjs
+          npm --prefix wechat-ui run build
+          npm --prefix wechat-ui run test
 
       # Missing translations are fine; English-side errors and broken translations fail.
       - name: Check translations

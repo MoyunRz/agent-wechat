@@ -87,10 +87,11 @@ the archived capture mock:
 
 ```sh
 pnpm install --frozen-lockfile
+npm --prefix wechat-ui ci
 pnpm client:dev
 ```
 
-See the [client preview](../../packages/client-ui/README.md) and
+See the [chat interface guide](../../wechat-ui/README.md) and
 [simulator](../../packages/native-client-rust/crates/wechat-simulator/README.md)
 guides. The real hub supports synthetic incoming text/media, group actions, and
 send-failure scenarios without connecting to WeChat. It starts its own fixtures;

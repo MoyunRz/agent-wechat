@@ -1,0 +1,61 @@
+/* Styles moved from the component's <style scoped> block. Class names are
+   unchanged; the scope attribute is gone, so selectors stay global. */
+
+.thread-avatar {
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--panel-soft);
+  color: #fff;
+  font-weight: 600;
+  user-select: none;
+}
+
+.thread-avatar img,
+.fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thread-avatar img {
+  object-fit: cover;
+}
+
+.fallback {
+  font-size: 0.9em;
+}
+
+/* Plain grey user glyph fallback for slots that only need to show that a person is present rather than an initial. */
+.user-fallback {
+  background: var(--panel-hover);
+  color: var(--muted);
+}
+
+.special-glyph {
+  width: 62%;
+  height: 62%;
+  display: block;
+}
+
+.member-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  width: 100%;
+  height: 100%;
+  gap: 1px;
+  background: var(--panel);
+}
+
+.member-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62em;
+  color: #fff;
+  overflow: hidden;
+}

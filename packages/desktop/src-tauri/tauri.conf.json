@@ -5,8 +5,8 @@
   "version": "2.3.2",
   "identifier": "io.github.thisnick.agent-wechat",
   "build": {
-    "beforeBuildCommand": "pnpm --filter @agent-wechat/client-ui build",
-    "frontendDist": "../../client-ui/dist"
+    "beforeBuildCommand": "node -e \"const fs=require('fs');const p=fs.existsSync('../../wechat-ui')?'../../wechat-ui':'../../../wechat-ui';require('child_process').execSync('npm --prefix '+p+' run build',{stdio:'inherit'})\"",
+    "frontendDist": "../../../wechat-ui/dist"
   },
   "app": {
     "windows": [

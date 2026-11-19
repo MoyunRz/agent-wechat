@@ -70,6 +70,173 @@ pub(super) fn routes() -> Router<App> {
         )
         .api_route("/v1/accounts/{a}/contact-sync", post(sync_contacts))
         .api_route("/v1/accounts/{a}/group-sync", post(sync_groups))
+        .api_route(
+            "/v1/accounts/{a}/ai/config",
+            get(ai_config).put(set_ai_config),
+        )
+        .api_route(
+            "/v1/accounts/{a}/ai/chat/completions",
+            post(ai_chat_completions),
+        )
+        .api_route("/v1/accounts/{a}/ai/models", post(refresh_ai_models))
+}
+
+/// Shared OpenAI-compatible upstream client; reuse connection pools.
+fn ai_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
+/// Normalize a provider base URL to the OpenAI-compatible root: trim the
+/// trailing slash and append `/v1` when the caller gave the bare origin.
+fn ai_base_url(base: &str) -> String {
+    let trimmed = base.trim().trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1")
+    }
+}
+
+async fn ai_config(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "read")?;
+    match app.core.store.ai_config(&a)? {
+        Some(config) => Ok(Json(json!({
+            "baseUrl": config.base_url,
+            "models": config.models,
+            "model": config.model,
+            "reasoning": config.reasoning,
+            "keyConfigured": !config.api_key.is_empty(),
+            "updatedAt": config.updated_at,
+        }))),
+        None => Ok(Json(json!({
+            "baseUrl": "",
+            "models": [],
+            "model": "",
+            "reasoning": "",
+            "keyConfigured": false,
+            "updatedAt": null,
+        }))),
+    }
+}
+async fn set_ai_config(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(input): Json<contracts::NativeAiConfigRequest>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "admin")?;
+    let updated_at = app.core.store.set_ai_config(
+        &a,
+        &input.base_url,
+        input.api_key.as_deref(),
+        &input.models,
+        &input.model,
+        &input.reasoning,
+    )?;
+    Ok(Json(json!({"updatedAt": updated_at})))
+}
+async fn refresh_ai_models(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+) -> ApiResult<Json<Value>> {
+    c.require(Some(&a), "read")?;
+    let config = app
+        .core
+        .store
+        .ai_config(&a)?
+        .filter(|config| !config.base_url.is_empty())
+        .context("ai_not_configured")?;
+    let url = format!("{}/models", ai_base_url(&config.base_url));
+    let response = ai_client()
+        .get(url)
+        .bearer_auth(&config.api_key)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "ai_upstream_error"))?;
+    if !response.status().is_success() {
+        return Err(ApiError(StatusCode::BAD_GATEWAY, "ai_upstream_error"));
+    }
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "ai_upstream_error"))?;
+    // OpenAI lists `{data:[{id}]}`; some compatible providers use
+    // `{models:[...]}` with objects or plain strings. Accept all three.
+    let mut models: Vec<String> = Vec::new();
+    let entries = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| payload.get("models").and_then(Value::as_array));
+    if let Some(entries) = entries {
+        for entry in entries {
+            let id = match entry {
+                Value::String(id) => Some(id.clone()),
+                Value::Object(object) => {
+                    object.get("id").and_then(Value::as_str).map(str::to_owned)
+                }
+                _ => None,
+            };
+            if let Some(id) = id {
+                if !id.is_empty() {
+                    models.push(id);
+                }
+            }
+        }
+    }
+    models.sort();
+    models.dedup();
+    Ok(Json(json!({"models": models})))
+}
+async fn ai_chat_completions(
+    State(app): State<App>,
+    Extension(c): Extension<Claims>,
+    Path(a): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<axum::response::Response> {
+    c.require(Some(&a), "send")?;
+    if !body.is_object() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_request"));
+    }
+    let config = app
+        .core
+        .store
+        .ai_config(&a)?
+        .filter(|config| !config.base_url.is_empty() && !config.api_key.is_empty())
+        .context("ai_not_configured")?;
+    let url = format!("{}/chat/completions", ai_base_url(&config.base_url));
+    let upstream = ai_client()
+        .post(url)
+        .bearer_auth(&config.api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "ai_upstream_error"))?;
+    let status = upstream.status();
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .cloned();
+    let stream = upstream.bytes_stream();
+    let mut response = axum::response::Response::new(axum::body::Body::from_stream(stream));
+    *response.status_mut() = status;
+    if let Some(content_type) = content_type {
+        response
+            .headers_mut()
+            .insert(reqwest::header::CONTENT_TYPE, content_type);
+    }
+    Ok(response)
 }
 async fn recall_message(
     State(app): State<App>,

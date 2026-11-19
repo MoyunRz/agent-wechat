@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeApiError, NativeWeChatClient } from "../packages/shared/dist/index.js";
-import { HubSession } from "../packages/client-ui/src/session.ts";
-import { HistorySearch } from "../packages/client-ui/src/history-search.ts";
-import { LoginAttempt } from "../packages/client-ui/src/login-attempt.ts";
+import { HubSession } from "./client-support/session.ts";
+import { HistorySearch } from "./client-support/history-search.ts";
+import { LoginAttempt } from "./client-support/login-attempt.ts";
 import { mediaJourney } from "./client-ui-media-smoke.mjs";
 import { groupJourney } from "./client-ui-group-smoke.mjs";
 import { accountJourney } from "./client-ui-account-smoke.mjs";
@@ -178,7 +178,7 @@ async function launcherCheck() {
   await new Promise((done) => reservation.close(done));
   const child = spawn(
     process.execPath,
-    [join(root, "packages/client-ui/scripts/dev.mjs")],
+    [join(root, "scripts/client-support/preview-launcher.mjs")],
     {
       stdio: ["ignore", "pipe", "pipe"],
       env: {

@@ -1569,6 +1569,46 @@
         ],
         "type": "object"
       },
+      "NativeAiConfigRequest": {
+        "additionalProperties": false,
+        "description": "Request to store the daemon-wide AI assistant configuration. `apiKey` of\nnull or an empty string keeps the previously stored key.",
+        "properties": {
+          "apiKey": {
+            "default": null,
+            "description": "The provider API key. Omit or send empty to keep the stored key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "baseUrl": {
+            "description": "Base URL of an OpenAI-compatible provider, such as\n`https://api.openai.com/v1`.",
+            "type": "string"
+          },
+          "model": {
+            "description": "The currently selected model identifier.",
+            "type": "string"
+          },
+          "models": {
+            "description": "The selectable model identifiers.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reasoning": {
+            "default": "",
+            "description": "Reasoning effort (`minimal`/`low`/`medium`/`high`) sent as\n`reasoning_effort`; empty means the parameter is not sent.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseUrl",
+          "models",
+          "model"
+        ],
+        "type": "object"
+      },
       "NativeContact": {
         "description": "A contact saved in the account's profile.",
         "properties": {
@@ -4314,6 +4354,199 @@
         "summary": "Change an account alias or whether it connects automatically when the daemon starts.",
         "tags": [
           "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/ai/chat/completions": {
+      "post": {
+        "operationId": "aiChatCompletions",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {},
+              "x-agent-wechat-untyped": true
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "send"
+            ]
+          }
+        ],
+        "summary": "Forward an OpenAI-compatible chat completion request to the account's configured provider with the stored API key. Streaming responses are passed through as they arrive.",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/ai/config": {
+      "get": {
+        "operationId": "getAiConfig",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Show one WeChat account's AI assistant configuration. The API key is never returned; only whether one is configured.",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "operationId": "setAiConfig",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeAiConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "admin"
+            ]
+          }
+        ],
+        "summary": "Store one WeChat account's AI assistant configuration: an OpenAI-compatible base URL, the provider API key and the selectable models. An empty or omitted apiKey keeps the stored key.",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/accounts/{a}/ai/models": {
+      "post": {
+        "operationId": "refreshAiModels",
+        "parameters": [
+          {
+            "description": "Account ID or alias.",
+            "in": "path",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {},
+                "x-agent-wechat-untyped": true
+              }
+            },
+            "description": "Success."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "read"
+            ]
+          }
+        ],
+        "summary": "Fetch the model catalogue from the account's configured OpenAI-compatible provider and return the sorted model identifiers.",
+        "tags": [
+          "ai"
         ]
       }
     },
@@ -9676,6 +9909,73 @@
         ]
       }
     },
+    "/v1/login-attempts": {
+      "post": {
+        "operationId": "createUnboundLoginAttempt",
+        "parameters": [
+          {
+            "description": "Repeating a request with the same key returns the original result instead of repeating the work.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeOperation"
+                }
+              }
+            },
+            "description": "Accepted. The work continues in the background."
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": [
+              "login"
+            ]
+          }
+        ],
+        "summary": "Start signing in without choosing an account. The daemon routes the login to the matching account on success; poll the returned operation with that account.",
+        "tags": [
+          "auth"
+        ],
+        "x-agent-wechat-sdk-request": [
+          {
+            "$ref": "#/components/schemas/LoginRequest"
+          }
+        ],
+        "x-agent-wechat-sdk-response": [
+          {
+            "$ref": "#/components/schemas/NativeOperation"
+          }
+        ]
+      }
+    },
     "/v1/profiles/official": {
       "post": {
         "operationId": "prepareOfficialProfile",
@@ -9902,6 +10202,10 @@
     {
       "description": "Signing in, connecting and signing out.",
       "name": "auth"
+    },
+    {
+      "description": "The daemon-wide AI assistant: configuration and OpenAI-compatible chat forwarding.",
+      "name": "ai"
     },
     {
       "description": "Voice calls. The two sockets are described in asyncapi.json.",

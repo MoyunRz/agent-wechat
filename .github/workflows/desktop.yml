@@ -89,6 +89,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @agent-wechat/desktop...
       - run: pnpm --filter @agent-wechat/desktop build
       - run: pnpm --filter @agent-wechat/shared build
+      - run: npm ci --prefix wechat-ui
       - name: Download the CLI already built and validated in this run
         if: inputs.native_artifact_prefix != ''
         uses: actions/download-artifact@v8
@@ -244,7 +245,8 @@ jobs:
           toolchain: 1.93.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @agent-wechat/shared build
-      - run: pnpm --filter @agent-wechat/client-ui build
+      - run: npm ci --prefix wechat-ui
+      - run: npm --prefix wechat-ui run build
       - uses: actions/download-artifact@v8
         with:
           name: desktop-signed-windows-${{ matrix.arch }}
@@ -333,7 +335,8 @@ jobs:
           toolchain: 1.93.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @agent-wechat/shared build
-      - run: pnpm --filter @agent-wechat/client-ui build
+      - run: npm ci --prefix wechat-ui
+      - run: npm --prefix wechat-ui run build
       - uses: actions/download-artifact@v8
         with:
           name: desktop-input-macos-arm64

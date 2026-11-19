@@ -15,13 +15,10 @@ if (
   rustVersion !== cli.version
 )
   throw new Error("Desktop, native CLI and app versions must match");
-if (config.build.frontendDist !== "../../client-ui/dist")
+if (config.build.frontendDist !== "../../../wechat-ui/dist")
   throw new Error("Desktop must package the existing UI");
 if (!config.bundle.externalBin.includes("binaries/wx"))
   throw new Error("Desktop must include the native CLI");
-if (
-  cli.dependencies?.["@agent-wechat/desktop"] ||
-  cli.dependencies?.["@agent-wechat/client-ui"]
-)
+if (cli.dependencies?.["@agent-wechat/desktop"])
   throw new Error("CLI must not depend on desktop or UI");
 console.log("Desktop package and native version agree");

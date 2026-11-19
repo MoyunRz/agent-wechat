@@ -245,8 +245,7 @@ impl Session {
         let deadline = Instant::now() + timeout;
         // Resolver and connect are constrained by the caller's blocking worker. Socket
         // read/write deadlines bound every subsequent protocol operation.
-        use std::net::ToSocketAddrs;
-        let addresses = (host, 80).to_socket_addrs()?;
+        let addresses = crate::resolve::resolve(host, 80)?;
         let mut socket = None;
         for addr in addresses {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -712,11 +711,16 @@ pub fn short_exchange(
     timeout: Duration,
 ) -> Result<Vec<u8>> {
     let (hello, extensions, wire) = prepare_short_exchange(session, host, path, payload)?;
+    let address = crate::resolve::resolve(host, 80)?
+        .into_iter()
+        .next()
+        .context("Native connection failed")?;
     let client = reqwest::blocking::Client::builder()
         .timeout(timeout)
         .connect_timeout(timeout.min(Duration::from_secs(10)))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
+        .resolve(host, address)
         .build()?;
     let mut response = client
         .post(format!(
@@ -792,11 +796,16 @@ pub(crate) async fn short_exchange_interruptible(
     timeout: Duration,
 ) -> Result<Vec<u8>> {
     let (hello, extensions, wire) = prepare_short_exchange(session, host, path, payload)?;
+    let address = crate::resolve::resolve(host, 80)?
+        .into_iter()
+        .next()
+        .context("Native connection failed")?;
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .connect_timeout(timeout.min(Duration::from_secs(10)))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
+        .resolve(host, address)
         .build()?;
     let mut response = client
         .post(format!(

@@ -6,11 +6,11 @@ import { frontmatter, hash } from './docs.mjs';
 
 test('the bot may change only translation files of the languages it is translating', () => {
   const scope = { tags: ['zh-CN'], folders: ['zh-cn'] };
-  assert.equal(allowedPath('packages/client-ui/locales/zh-CN.json', scope), true);
+  assert.equal(allowedPath('wechat-ui/src/i18n/shell/zh-CN.json', scope), true);
   assert.equal(allowedPath('docs/src/content/docs/zh-cn/setup/install.mdx', scope), true);
-  assert.equal(allowedPath('packages/client-ui/locales/en.json', scope), false);
-  assert.equal(allowedPath('packages/client-ui/locales/zh-CN.meta.json', scope), false);
-  assert.equal(allowedPath('packages/client-ui/locales/ja.json', scope), false);
+  assert.equal(allowedPath('wechat-ui/src/i18n/shell/en.json', scope), false);
+  assert.equal(allowedPath('wechat-ui/i18n/shell/zh-CN.meta.json', scope), false);
+  assert.equal(allowedPath('wechat-ui/src/i18n/shell/ja.json', scope), false);
   assert.equal(allowedPath('docs/src/content/docs/setup/install.mdx', scope), false);
   assert.equal(allowedPath('docs/src/content/docs/zh-cn/../../../../.github/workflows/x.yml', scope), false);
   assert.equal(allowedPath('.github/workflows/i18n-translate.yml', scope), false);
@@ -56,13 +56,14 @@ test('the pull request body lists counts, dropped items and the back-translation
 });
 
 test('a re-translated stale string is checked as current, so a broken one is caught', () => {
-  const locales = 'packages/client-ui/locales';
+  const locales = 'wechat-ui/src/i18n/shell';
+  const meta = 'wechat-ui/i18n/shell';
   const en = { app: { hello: 'Hello {{who}}' } };
   const tree = {
     [`${locales}/en.json`]: JSON.stringify(en),
     // Claude's update dropped the placeholder; the meta file still records the old English.
     [`${locales}/zh-CN.json`]: JSON.stringify({ app: { hello: '你好' } }),
-    [`${locales}/zh-CN.meta.json`]: JSON.stringify({ 'app.hello': { source: hash('Hello {{name}}') } }),
+    [`${meta}/zh-CN.meta.json`]: JSON.stringify({ 'app.hello': { source: hash('Hello {{name}}') } }),
     'src/main.ts': 't("app.hello", { who })',
     'src/i18n.ts': 'tag: "en" tag: "zh-CN"',
   };
@@ -71,7 +72,7 @@ test('a re-translated stale string is checked as current, so a broken one is cau
     return tree[path];
   };
   const list = (dir, extensions) => Object.keys(tree).filter(path => path.startsWith(`${dir}/`) && extensions.some(extension => path.endsWith(extension)));
-  const config = { locales, code: ['src'], desktopCode: [], registries: { 'src/i18n.ts': /tag: "([^"]+)"/g } };
+  const config = { locales, meta, code: ['src'], desktopCode: [], registries: { 'src/i18n.ts': /tag: "([^"]+)"/g } };
   // Read as recorded, the key is stale and its placeholder is not checked.
   assert.deepEqual(checkUi({ read, list, config }), []);
   const work = { 'zh-CN': { ui: [{ key: 'app.hello', current: { 'app.hello': '你好 {{name}}' } }], docs: [] } };
@@ -88,10 +89,12 @@ test('only strings Claude changed are checked as current and recorded; untouched
   const catalog = { 'app.hello': '你好', 'app.items_other': '共 {{count}} 项', 'app.new': '新', 'app.other': '别的' };
   assert.deepEqual(changedKeys(catalog, entry), ['app.items_other', 'app.new']);
   // A stale key Claude left alone keeps its old record, so it stays exempt and is not dropped.
+  const locales = 'wechat-ui/src/i18n/shell';
+  const metaDir = 'wechat-ui/i18n/shell';
   const read = path => ({
-    'packages/client-ui/locales/zh-CN.meta.json': JSON.stringify({ 'app.hello': { source: 'old' } }),
-    'packages/client-ui/locales/zh-CN.json': JSON.stringify({ app: { hello: '你好', new: '新' } }),
+    [`${metaDir}/zh-CN.meta.json`]: JSON.stringify({ 'app.hello': { source: 'old' } }),
+    [`${locales}/zh-CN.json`]: JSON.stringify({ app: { hello: '你好', new: '新' } }),
   })[path] ?? (() => { throw new Error('no file'); })();
-  const meta = JSON.parse(readAsCurrent(read, { 'zh-CN': { ui: entry.ui } }, { 'app.new': 'New' })('packages/client-ui/locales/zh-CN.meta.json'));
+  const meta = JSON.parse(readAsCurrent(read, { 'zh-CN': { ui: entry.ui } }, { 'app.new': 'New' })(`${metaDir}/zh-CN.meta.json`));
   assert.deepEqual(meta, { 'app.hello': { source: 'old' }, 'app.new': { source: hash('New') } });
 });

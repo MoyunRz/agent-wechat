@@ -83,8 +83,9 @@ export function changedKeys(catalog, entry) {
  * would still look stale and skip the placeholder and plural checks.
  */
 export function readAsCurrent(read, work, en) {
+  const metaDir = ui.meta ?? ui.locales;
   return path => {
-    const tag = path.startsWith(`${ui.locales}/`) && path.endsWith('.meta.json') ? path.slice(ui.locales.length + 1, -'.meta.json'.length) : null;
+    const tag = path.startsWith(`${metaDir}/`) && path.endsWith('.meta.json') ? path.slice(metaDir.length + 1, -'.meta.json'.length) : null;
     if (!tag || !work[tag]) return read(path);
     let meta = {};
     try {

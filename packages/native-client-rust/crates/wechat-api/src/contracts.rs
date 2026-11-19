@@ -660,6 +660,27 @@ pub struct NativeOpenClawConfigRequest {
     #[ts(type = "any | null")]
     pub config: Option<Value>,
 }
+/// Request to store the daemon-wide AI assistant configuration. `apiKey` of
+/// null or an empty string keeps the previously stored key.
+#[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeAiConfigRequest {
+    /// Base URL of an OpenAI-compatible provider, such as
+    /// `https://api.openai.com/v1`.
+    pub base_url: String,
+    /// The provider API key. Omit or send empty to keep the stored key.
+    #[serde(default)]
+    #[ts(optional)]
+    pub api_key: Option<String>,
+    /// The selectable model identifiers.
+    pub models: Vec<String>,
+    /// The currently selected model identifier.
+    pub model: String,
+    /// Reasoning effort (`minimal`/`low`/`medium`/`high`) sent as
+    /// `reasoning_effort`; empty means the parameter is not sent.
+    #[serde(default)]
+    pub reasoning: String,
+}
 /// Request to mark a chat as read.
 #[derive(Serialize, Deserialize, TS, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

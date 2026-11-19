@@ -261,8 +261,35 @@ impl Core {
                 .get(account)
                 != Some(&stamp)
             {
-                wechat_profile::verify_profile_password(&location, &keys, &state.database_password)
+                // The keys file stores each database's derived page key, so the
+                // profile opens with the stored keys alone. A fresh login
+                // carries the server's current AuthSect field 9 password, which
+                // need not match the password these databases were first
+                // encrypted with; when the stored keys cover every database
+                // with matching salts, admit by coverage instead of by
+                // re-deriving from the incoming password.
+                let storage = location.root().join("db_storage");
+                let mut covered = true;
+                for relative in &actual {
+                    let Some(entry) = keys.databases.get(relative) else {
+                        covered = false;
+                        break;
+                    };
+                    let mut salt = [0; 16];
+                    std::fs::File::open(storage.join(relative))?.read_exact(&mut salt)?;
+                    if salt != entry.salt {
+                        covered = false;
+                        break;
+                    }
+                }
+                if !covered {
+                    wechat_profile::verify_profile_password(
+                        &location,
+                        &keys,
+                        &state.database_password,
+                    )
                     .map_err(password_admission_error)?;
+                }
                 self.password_proofs
                     .lock()
                     .map_err(|_| anyhow::anyhow!("identity proof unavailable"))?

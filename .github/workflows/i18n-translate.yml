@@ -20,13 +20,13 @@ on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
     paths:
-      - 'packages/client-ui/locales/en.json'
+      - 'wechat-ui/src/i18n/shell/en.json'
       - 'docs/src/content/docs/**'
       - 'docs/locales.mjs'
   push:
     branches: [main]
     paths:
-      - 'packages/client-ui/locales/en.json'
+      - 'wechat-ui/src/i18n/shell/en.json'
       - 'docs/src/content/docs/**'
       - 'docs/locales.mjs'
       # A change to the bot itself runs it once on main.
@@ -89,7 +89,7 @@ jobs:
           allowed_bots: github-actions
           prompt: |
             Translate English text for agent-wechat. ${{ runner.temp }}/work.json lists the work per
-            language tag: `ui` entries are keys of packages/client-ui/locales/<tag>.json (nested by the
+            language tag: `ui` entries are keys of wechat-ui/src/i18n/shell/<tag>.json (nested by the
             dots in the key) with their English text and any current translation; `docs` entries name an
             English page and the translation file to write.
 
