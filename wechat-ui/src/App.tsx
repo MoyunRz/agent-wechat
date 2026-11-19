@@ -17,12 +17,15 @@ import { DesktopUpdateBanner } from './components/desktop/DesktopUpdateBanner'
 import type { Contact } from './types'
 import {
   bootstrap,
+  closeContactEditor,
   dismissToast,
   goBackToList,
   jumpToLatestMessage,
   jumpToSearchResult,
+  loadContactDirectory,
   loadThreads,
   markActiveThreadRead,
+  openContactEditor,
   openToast,
   refreshAccount,
   refreshActiveMessages,
@@ -41,6 +44,7 @@ import {
   setDetailsOpen,
   setLightboxSrc,
   setQrFailed,
+  setRailView,
   setThreadSearchQuery,
   startChatWithContact,
   startChatWithId,
@@ -54,8 +58,11 @@ import {
 import { useStore } from './store/hooks'
 import AppRail from './components/AppRail'
 import Composer from './components/Composer'
+import ContactDetailCard from './components/ContactDetailCard'
+import ContactRequestsPanel from './components/ContactRequestsPanel'
 import ContactSearchDialog from './components/ContactSearchDialog'
 import ContactsPanel from './components/ContactsPanel'
+import GlobalSearchDialog from './components/GlobalSearchDialog'
 import Icon from './components/Icon'
 import LoginPanel from './components/LoginPanel'
 import MessageList from './components/MessageList'
@@ -78,6 +85,7 @@ export default function App() {
   const mobileChatOpen = useStore(selectMobileChatOpen)
   const detailsOpen = useStore(state => state.threads.detailsOpen)
   const contactDialogOpen = useStore(state => state.threads.contactDialogOpen)
+  const contactEditorId = useStore(state => state.ui.contactEditorId)
   const connectionState = useStore(selectConnectionState)
   const peerIsStranger = useStore(selectPeerIsStranger)
   const accountActionError = useStore(state => state.session.accountActionError)
@@ -112,6 +120,7 @@ export default function App() {
   // The engine starts once. In the desktop shell that is after the hub session
   // resolves, and again when the user connects a different hub.
   const [engineReady, setEngineReady] = useState(!desktop)
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false)
 
   useEffect(() => {
     if (!desktop) {
@@ -184,6 +193,20 @@ export default function App() {
     if (searchOpen)
       searchInputRef.current?.focus()
   }, [searchOpen])
+
+  // ⌘K / Ctrl+K opens the global search from anywhere in the chat shell.
+  useEffect(() => {
+    if (!account)
+      return undefined
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k')
+        return
+      event.preventDefault()
+      setGlobalSearchOpen(true)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [account?.id])
 
   const authenticated = hasHubAuth()
 
@@ -288,6 +311,7 @@ export default function App() {
           <>
             <div className="rail-slot" hidden={railView !== 'chats'}><ThreadList /></div>
             <div className="rail-slot" hidden={railView !== 'contacts'}><ContactsPanel /></div>
+            <div className="rail-slot" hidden={railView !== 'requests'}><ContactRequestsPanel /></div>
 
             <main className="chat-pane">
               <header className="chat-header">
@@ -365,7 +389,7 @@ export default function App() {
                         <p>{t('面向人与 AI 智能体的开源微信客户端')}</p>
                       </div>
                       <div className="chat-actions">
-                        <button className="icon-button" type="button" title={t('搜索聊天')} onClick={() => { /* focus thread list search */ }}>
+                        <button className="icon-button" type="button" title={t('搜索聊天')} onClick={() => setGlobalSearchOpen(true)}>
                           <Icon name="search" size={16} />
                         </button>
                       </div>
@@ -527,6 +551,14 @@ export default function App() {
                       <Icon name="check" size={14} />
                       {t('标记已读')}
                     </button>
+                    {activeThread.kind === 'direct'
+                      && !detailsPeerId.startsWith('gh_')
+                      && !detailsPeerId.endsWith('@openim') && (
+                        <button type="button" className="details-action" onClick={() => openContactEditor(detailsPeerId)}>
+                          <Icon name="user" size={14} />
+                          {t('联系人资料')}
+                        </button>
+                      )}
                     <button type="button" className="details-action" disabled={manualRefreshing} onClick={() => void refreshActiveMessages()}>
                       <Icon name="refresh" size={14} className={manualRefreshing ? 'spin' : undefined} />
                       {t('刷新会话')}
@@ -599,6 +631,24 @@ export default function App() {
           onClose={() => setContactDialogOpen(false)}
           onSelect={(contact: Contact) => startChatWithContact(contact)}
           onStartId={(id: string) => startChatWithId(id)}
+          onOpenRequests={() => {
+            setContactDialogOpen(false)
+            setRailView('requests')
+          }}
+        />
+
+        {contactEditorId && (
+          <ContactDetailCard
+            contactId={contactEditorId}
+            onClose={closeContactEditor}
+            onChanged={() => { void loadContactDirectory(true) }}
+          />
+        )}
+
+        <GlobalSearchDialog
+          open={globalSearchOpen}
+          accountId={account.id}
+          onClose={() => setGlobalSearchOpen(false)}
         />
       </div>
     </div>

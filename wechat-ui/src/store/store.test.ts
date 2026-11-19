@@ -162,6 +162,7 @@ describe('state slices', () => {
       toastEnabled: true,
       railView: 'chats',
       toasts: [],
+      contactEditorId: null,
       settingsOpen: false,
     })
   })

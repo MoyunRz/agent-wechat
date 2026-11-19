@@ -117,7 +117,15 @@ export default function AppRail() {
           onClick={() => setRailView('contacts')}
         >
           <Icon name="contacts" size={24} />
-          {friendRequestCount > 0 && view !== 'contacts' && (
+        </button>
+        <button
+          type="button"
+          className={`rail-button${view === 'requests' ? ' active' : ''}`}
+          title={t('好友申请')}
+          onClick={() => setRailView('requests')}
+        >
+          <Icon name="users" size={22} />
+          {friendRequestCount > 0 && view !== 'requests' && (
             <span className="rail-badge">{badgeText(friendRequestCount)}</span>
           )}
         </button>

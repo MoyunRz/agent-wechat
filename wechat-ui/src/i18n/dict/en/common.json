@@ -1,1 +1,13 @@
-{}
+{
+  "全局搜索": "Global search",
+  "搜索联系人、群聊和聊天记录": "Search contacts, groups and messages",
+  "搜索联系人、群聊或消息": "Search contacts, groups or messages",
+  "搜索整个账号": "Search the whole account",
+  "输入名称、群名或消息内容；↑↓ 选择，Enter 打开。": "Enter a name, group name or message text; use ↑↓ and Enter.",
+  "没有找到匹配的内容": "No matches",
+  "试试更短的关键词，或检查是否已完成同步。": "Try a shorter keyword, or check that syncing has finished.",
+  "↑↓ 选择 · Enter 打开 · Esc 关闭": "↑↓ to select · Enter to open · Esc to close",
+  "[非文本消息]": "[Non-text message]",
+  "消息": "Messages",
+  "搜索失败，请稍后重试。": "Search failed. Please try again later."
+}

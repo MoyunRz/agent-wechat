@@ -4,6 +4,7 @@ import type {
   Contact,
   ContactDiscovery,
   ContactLookupResponse,
+  ContactPrivacySettings,
   ContactRequest,
   ContactRequestPage,
   GroupMember,
@@ -445,13 +446,15 @@ export const wechatApi = {
    */
   async listContactRequests(
     accountId: string,
-    options: { direction?: 'incoming' | 'outgoing', actionable?: boolean, limit?: number, cursor?: string } = {},
+    options: { direction?: 'incoming' | 'outgoing', actionable?: boolean, search?: string, limit?: number, cursor?: string } = {},
   ): Promise<ContactRequestPage> {
     const params = new URLSearchParams()
     if (options.direction)
       params.set('direction', options.direction)
     if (options.actionable)
       params.set('actionable', 'true')
+    if (options.search?.trim())
+      params.set('search', options.search.trim())
     if (options.limit)
       params.set('limit', String(Math.min(options.limit, 200)))
     if (options.cursor)
@@ -490,6 +493,43 @@ export const wechatApi = {
       `/accounts/${enc(accountId)}/search/contacts`,
       'POST',
       { query },
+    )
+  },
+
+  /** Send one greeting to a person returned by discovery. */
+  sendContactRequest(
+    accountId: string,
+    input: { recipientRef: string, message: string, privacy?: ContactPrivacySettings },
+  ): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/contact-requests`,
+      'POST',
+      input,
+      { 'Idempotency-Key': idempotencyKey('contact-request-send') },
+    )
+  },
+
+  /** Change relationship privacy or the remark against the inspected version. */
+  updateContact(
+    accountId: string,
+    username: string,
+    input: { privacy?: ContactPrivacySettings, remark?: string | null, expectedVersion: string },
+  ): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/contacts/${enc(username)}`,
+      'PATCH',
+      input,
+      { 'Idempotency-Key': idempotencyKey('contact-update') },
+    )
+  },
+
+  /** Remove the contact relationship; saved chat history stays. */
+  removeContact(accountId: string, username: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/contacts/${enc(username)}`,
+      'DELETE',
+      {},
+      { 'Idempotency-Key': idempotencyKey('contact-remove') },
     )
   },
 

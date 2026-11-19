@@ -77,6 +77,25 @@ const contactRow = (page, name) => page.locator(".contact-row").filter({ has: pa
  */
 const qr = (page) => [page.locator(".qr-frame img")];
 
+/** Synthetic request conversations for visual review; never contact the live service. */
+const requestSceneRows = [
+  { id: "fr_scene_casey", peerId: "sim_casey", displayName: "Casey Morgan", direction: "incoming", message: "Hello, we met at the book club.", updatedAt: 1700000800, version: "scene-incoming-v1", isContact: false, actionable: true, attention: true, state: "request_received", history: [{ serverId: "123", message: "Hello, we met at the book club.", createdAt: 1700000800, direction: "incoming" }] },
+  { id: "fr_scene_jordan", peerId: "sim_jordan", displayName: "Jordan Lee", direction: "outgoing", message: "Let's keep in touch.", updatedAt: 1700000700, version: "scene-outgoing-v1", isContact: false, actionable: false, attention: false, state: "request_sent", history: [{ serverId: "0", message: "Let's keep in touch.", createdAt: 1700000700, direction: "outgoing" }] },
+];
+
+/** Serves the synthetic inbox rows at the daemon's boundary. */
+async function mockRequests(page) {
+  await page.route("**/v1/accounts/*/contact-requests*", (route) => {
+    if (route.request().method() !== "GET")
+      return route.continue();
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/contact-requests"))
+      return route.fulfill({ json: { items: requestSceneRows, nextCursor: null, pendingIncomingCount: 1, sourceGeneration: "scene", coverage: {}, asOfEventCursor: "0" } });
+    const row = requestSceneRows.find(item => path.endsWith(`/contact-requests/${item.id}`));
+    return row ? route.fulfill({ json: row }) : route.continue();
+  });
+}
+
 export const scenes = [
   {
     name: "login-qr",
@@ -342,6 +361,129 @@ export const scenes = [
       await expect(page.locator(".contacts-panel h2")).toHaveText("Contacts");
       await expect(contactRow(page, "Mei Chen")).toBeVisible();
       await expect(contactRow(page, "Daniel Park")).toBeVisible();
+    },
+  },
+  {
+    name: "friend-requests",
+    route: "requests",
+    description: "The friend-request inbox with received and sent requests and its direction tabs.",
+    viewports: ["desktop", "narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    prepare: async ({ page }) => { await mockRequests(page); },
+    ready: async ({ page, expect }) => {
+      const panel = page.locator(".requests-panel");
+      await expect(panel.locator("h2")).toHaveText("Friend requests");
+      await expect(panel.getByText("Casey Morgan", { exact: true })).toBeVisible();
+      await expect(panel.getByText("Jordan Lee", { exact: true })).toBeVisible();
+      await expect(panel.locator(".request-tabs .request-tab.active")).toHaveText("All");
+    },
+  },
+  {
+    name: "friend-request-review",
+    route: "requests",
+    description: "One request opened from the inbox, with its greeting, history and accept action.",
+    viewports: ["desktop", "narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    prepare: async ({ page }) => { await mockRequests(page); },
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".requests-panel .requests-row").filter({ hasText: "Casey Morgan" })).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator(".requests-row").filter({ hasText: "Casey Morgan" }).click();
+      const dialog = page.locator(".requests-detail");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText("Request history")).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Accept", exact: true })).toBeVisible();
+    },
+  },
+  {
+    name: "contact-details",
+    route: "contacts",
+    description: "A saved contact card with remark editing and relationship privacy, opened from the contact list.",
+    viewports: ["desktop", "compact"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(contactRow(page, "Mei Chen")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      const target = contactRow(page, "Mei Chen");
+      await target.hover();
+      await target.locator(".contact-details").click();
+      const card = page.locator(".contact-card");
+      await expect(card).toBeVisible();
+      await expect(card.locator(".contact-field input")).toBeVisible();
+      await expect(card.getByText("Relationship privacy")).toBeVisible();
+    },
+  },
+  {
+    name: "contact-details-remove",
+    route: "contacts",
+    description: "The contact card's remove confirmation, which keeps chat history.",
+    viewports: ["desktop", "compact"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(contactRow(page, "Mei Chen")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      const target = contactRow(page, "Mei Chen");
+      await target.hover();
+      await target.locator(".contact-details").click();
+      const card = page.locator(".contact-card");
+      await expect(card).toBeVisible();
+      await card.getByRole("button", { name: "Remove contact", exact: true }).click();
+      await expect(card.getByText("Remove this person from your contacts. Your chat history stays.")).toBeVisible();
+    },
+  },
+  {
+    name: "add-contact",
+    route: "new-chat",
+    description: "Server discovery and the greeting and privacy choices shown before a friend request is sent.",
+    viewports: ["desktop", "narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    prepare: async ({ page }) => {
+      await page.route("**/v1/accounts/*/search/contacts", route => route.fulfill({
+        json: { displayName: "avery.example", recipientRef: "scene-only-reference", expiresAt: 1700001400, source: "wechat", request: null, contactId: null },
+      }));
+    },
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".contact-dialog .contact-head strong")).toHaveText("New chat");
+    },
+    actions: async ({ page, expect }) => {
+      const dialog = page.locator(".contact-dialog");
+      await dialog.getByPlaceholder("Search contacts or enter a WeChat ID").fill("avery.example");
+      await dialog.locator(".discovery-trigger").click();
+      await expect(dialog.getByText("avery.example", { exact: true })).toBeVisible();
+      await dialog.getByRole("button", { name: "Add friend", exact: true }).click();
+      await expect(dialog.getByPlaceholder("Write a greeting; they will see it")).toBeVisible();
+    },
+  },
+  {
+    name: "omni-search",
+    route: "chats",
+    description: "The ⌘K search dialog with contacts, groups and matching messages in separate sections.",
+    viewports: ["desktop"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    prepare: async ({ page }) => {
+      // Only the account-wide message search; conversation history keeps its own route.
+      await page.route(/\/v1\/accounts\/[^/]+\/messages\?/, async route => route.fulfill({
+        json: { items: [{ id: "scene_message", accountId: ACCOUNT.id, threadId: "sim_mei", serverId: "9007199254740999", senderId: "sim_mei", type: 1, direction: "incoming", body: "Are we still on for lunch tomorrow?", createdAt: "2023-11-14T22:15:00Z", version: "scene" }], nextCursor: null },
+      }));
+    },
+    ready: async ({ page, expect }) => {
+      await expect(row(page, "Mei Chen")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.keyboard.press("Control+k");
+      const dialog = page.locator(".global-search-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByPlaceholder("Search contacts, groups or messages").fill("lunch");
+      await expect(dialog.getByText("Are we still on for lunch tomorrow?")).toBeVisible();
     },
   },
   {

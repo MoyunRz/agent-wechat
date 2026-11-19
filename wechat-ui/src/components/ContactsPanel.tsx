@@ -7,12 +7,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { wechatApi, WechatApiError } from '../api'
+import { formatRequestTime, requestName, requestStatus } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
 import type { Contact, ContactRequest, Operation } from '../types'
 import {
   loadContactDirectory,
+  openContactEditor,
   refreshContactAuthoritative,
   selectBusinessUsernames,
   startChatWithContact,
@@ -124,30 +126,6 @@ function contactMatches(
     contact.id,
   ]
   return fields.some(field => (field ?? '').trim().toLowerCase().includes(keyword))
-}
-
-function requestName(item: ContactRequest): string {
-  return item.displayName?.trim() || item.peerId || item.id
-}
-
-function formatRequestTime(value: number | null | undefined): string {
-  if (!value)
-    return '未知'
-  const time = new Date(value * 1000)
-  if (Number.isNaN(time.getTime()))
-    return '未知'
-  return time.toLocaleString('zh-CN', { hour12: false })
-}
-
-/** Why a request row cannot be accepted right now. */
-function requestStatus(item: ContactRequest): string {
-  if (item.actionable)
-    return '申请可处理'
-  if (item.isContact || item.state === 'contact')
-    return '你们已经是好友了'
-  if (item.state === 'request_sent')
-    return '等待对方确认'
-  return '申请已处理'
 }
 
 function describeSyncError(value: unknown): string {
@@ -535,6 +513,18 @@ export default function ContactsPanel() {
       void refreshContactAuthoritative(peer)
   }
 
+  /** Friends can edit their remark and relationship privacy in the card. */
+  function canEditContact(contact: Contact): boolean {
+    const peer = (contact.username || contact.id).trim()
+    return Boolean(peer) && !peer.startsWith('gh_') && !peer.endsWith('@openim')
+  }
+
+  function openContactDetails(contact: Contact): void {
+    const peer = (contact.username || contact.id).trim()
+    if (peer)
+      openContactEditor(peer)
+  }
+
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {
     if (event.key === 'Enter')
       startWithQuery()
@@ -667,24 +657,39 @@ export default function ContactsPanel() {
               if (!contact)
                 return null
               return (
-                <button
+                <div
                   key={row.key}
-                  type="button"
                   className={`contact-row${row.nested ? ' nested' : ''}`}
-                  onClick={() => startWithContact(contact)}
                 >
-                  <ThreadAvatar
-                    accountId={accountId}
-                    name={contactDisplayName(contact, openimNameCounts)}
-                    username={contact.username || contact.id}
-                    size={40}
-                  />
-                  <span className="contact-main">
-                    <span className="contact-name">{t(contactDisplayName(contact, openimNameCounts))}</span>
-                    {contact.alias ? <span className="contact-sub">{contact.alias}</span> : null}
-                  </span>
-                  <span className="contact-action">{t('聊天')}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="contact-row-main"
+                    onClick={() => startWithContact(contact)}
+                  >
+                    <ThreadAvatar
+                      accountId={accountId}
+                      name={contactDisplayName(contact, openimNameCounts)}
+                      username={contact.username || contact.id}
+                      size={40}
+                    />
+                    <span className="contact-main">
+                      <span className="contact-name">{t(contactDisplayName(contact, openimNameCounts))}</span>
+                      {contact.alias ? <span className="contact-sub">{contact.alias}</span> : null}
+                    </span>
+                    <span className="contact-action">{t('聊天')}</span>
+                  </button>
+                  {canEditContact(contact) && (
+                    <button
+                      type="button"
+                      className="contact-details"
+                      title={t('联系人资料')}
+                      aria-label={t('联系人资料')}
+                      onClick={() => openContactDetails(contact)}
+                    >
+                      <Icon name="user" size={14} />
+                    </button>
+                  )}
+                </div>
               )
             })
             : (

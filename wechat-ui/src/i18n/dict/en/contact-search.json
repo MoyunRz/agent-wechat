@@ -20,5 +20,20 @@
   "通讯录同步失败，请稍后重试。": "Contact sync failed. Please try again later.",
   "正在同步通讯录…": "Syncing contacts…",
   "通讯录同步超时，请稍后重试。": "Contact sync timed out. Please try again later.",
-  "通讯录已同步": "Contacts synced"
+  "通讯录已同步": "Contacts synced",
+  "在微信中搜索“{query}”": "Search WeChat for “{query}”",
+  "正在微信中搜索…": "Searching WeChat…",
+  "微信搜索结果": "WeChat search result",
+  "去处理": "Review",
+  "已发送申请": "Request sent",
+  "添加好友": "Add friend",
+  "对方已经申请添加你，在“好友申请”里通过即可。": "They already sent you a request; accept it in Friend requests.",
+  "申请已发送，等待对方确认。": "Request sent; waiting for them to confirm.",
+  "好友申请已发送，等待对方确认。": "Friend request sent; waiting for them to confirm.",
+  "填写验证申请，对方会看到这段话": "Write a greeting; they will see it",
+  "发送中…": "Sending…",
+  "发送申请": "Send request",
+  "发送好友申请失败，请稍后重试。": "Could not send the friend request. Please try again later.",
+  "没有找到这个微信号，请尝试输入准确的微信号。": "No such WeChat ID. Enter the exact WeChat ID.",
+  "在微信中搜索失败，请稍后重试。": "WeChat search failed. Please try again later."
 }

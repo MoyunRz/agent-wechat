@@ -1,6 +1,6 @@
 export type ThreadFilter = 'all' | 'unread' | 'direct' | 'groups' | 'mini' | 'official'
 
-export type RailView = 'chats' | 'contacts' | 'ai'
+export type RailView = 'chats' | 'contacts' | 'requests' | 'ai'
 
 export type ThemeMode = 'dark' | 'light'
 
@@ -94,12 +94,29 @@ export type Contact = {
   contactFlag?: number | null
   deleteFlag?: number | null
   verifyFlag?: number | null
+  /** Relationship privacy read from the official profile, when available. */
+  privacy?: ContactPrivacySettings | null
+  /** Version required when saving privacy or a remark for this contact. */
+  privacyVersion?: string | null
+  /** True while an accepted privacy change is waiting for contact sync. */
+  privacyPending?: boolean | null
+  /** True while an accepted remark is waiting for WeChat's saved value. */
+  remarkPending?: boolean | null
+  /** Why privacy cannot be edited yet; see the daemon's contact contract. */
+  privacyUnavailable?: string | null
   classification?: {
     category?: string | null
     namespace?: string | null
     businessKind?: string | null
     businessType?: string | null
   }
+}
+
+/** Relationship privacy the account owner can set for one contact. */
+export type ContactPrivacySettings = {
+  chatsOnly: boolean
+  hideMyPosts: boolean
+  hideTheirPosts: boolean
 }
 
 export type MediaKind = 'image' | 'video' | 'voice' | 'file'
@@ -270,6 +287,8 @@ export type ContactDiscovery = {
   expiresAt: number
   source: string
   request: ContactRequest | null
+  /** Saved contact ID when membership is already established. */
+  contactId?: string | null
 }
 
 /** 定向联系人查询（服务端 getcontact）返回的单条结果。 */

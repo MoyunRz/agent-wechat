@@ -273,8 +273,12 @@ export { setBubbleOutColor } from './ui'
 export { setToastDurationMs } from './ui'
 /** Enables or disables incoming message toasts. */
 export { setToastEnabled } from './ui'
-/** Selects the rail view (chats, contacts or AI). */
+/** Selects the rail view (chats, contacts, friend requests or AI). */
 export { setRailView } from './ui'
+/** Opens the contact detail card for one saved contact. */
+export { openContactEditor } from './ui'
+/** Closes the contact detail card. */
+export { closeContactEditor } from './ui'
 /** Opens the image lightbox at the given source; null closes it. */
 export { setLightboxSrc } from './ui'
 /** Closes the image lightbox. */

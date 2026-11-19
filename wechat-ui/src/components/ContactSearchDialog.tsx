@@ -6,13 +6,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { wechatApi, WechatApiError } from '../api'
+import { requestStatus } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
-import type { Contact, Operation } from '../types'
+import type { Contact, ContactDiscovery, ContactPrivacySettings, Operation } from '../types'
 import Icon from './Icon'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-search.css'
+import '../styles/components/contact-detail.css'
 
 type ContactSearchDialogProps = {
   open: boolean
@@ -20,6 +22,8 @@ type ContactSearchDialogProps = {
   onClose: () => void
   onSelect: (contact: Contact) => void
   onStartId: (id: string) => void
+  /** Jumps to the friend-request inbox for an incoming discovered request. */
+  onOpenRequests?: () => void
 }
 
 type Phase = 'closed' | 'entering' | 'open' | 'leaving'
@@ -66,12 +70,24 @@ function describeOperationFailure(operation: Operation): string {
   return '通讯录同步失败，请稍后重试。'
 }
 
+function describeDiscoveryError(value: unknown): string {
+  if (value instanceof WechatApiError) {
+    if (value.code === 'contact_discovery_rejected' || value.status === 400 || value.status === 404)
+      return '没有找到这个微信号，请尝试输入准确的微信号。'
+    if (value.status === 401 || value.status === 403 || value.status === 409)
+      return '请先登录微信并完成同步。'
+    return userFacingErrorMessage(value, '在微信中搜索失败，请稍后重试。')
+  }
+  return userFacingErrorMessage(value, '在微信中搜索失败，请稍后重试。')
+}
+
 export default function ContactSearchDialog({
   open,
   accountId,
   onClose,
   onSelect,
   onStartId,
+  onOpenRequests,
 }: ContactSearchDialogProps) {
   const t = useT()
   const [visible, setVisible] = useState(open)
@@ -83,11 +99,24 @@ export default function ContactSearchDialog({
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   const [syncFailed, setSyncFailed] = useState(false)
+  const [discovery, setDiscovery] = useState<ContactDiscovery | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState('')
+  const [requestOpen, setRequestOpen] = useState(false)
+  const [requestMessage, setRequestMessage] = useState('')
+  const [chatsOnly, setChatsOnly] = useState(false)
+  const [hideMyPosts, setHideMyPosts] = useState(false)
+  const [hideTheirPosts, setHideTheirPosts] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [sendError, setSendError] = useState('')
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchTimerRef = useRef<number | null>(null)
   const requestTokenRef = useRef(0)
   const syncTokenRef = useRef(0)
+  const discoveryTokenRef = useRef(0)
+  const discoveringRef = useRef(false)
   const syncingRef = useRef(false)
   const loadingRef = useRef(false)
   const queryRef = useRef('')
@@ -101,7 +130,26 @@ export default function ContactSearchDialog({
   openRef.current = open
   visibleRef.current = visible
 
+  /** Drops a previous server result and any draft send form. */
+  function resetDiscovery(): void {
+    discoveryTokenRef.current += 1
+    discoveringRef.current = false
+    setDiscovery(null)
+    setDiscovering(false)
+    setDiscoveryError('')
+    setRequestOpen(false)
+    setRequestMessage('')
+    setChatsOnly(false)
+    setHideMyPosts(false)
+    setHideTheirPosts(false)
+    setSending(false)
+    setSent(false)
+    setSendError('')
+  }
+
   function updateQuery(value: string): void {
+    if (value !== queryRef.current)
+      resetDiscovery()
     queryRef.current = value
     setQuery(value)
   }
@@ -184,6 +232,73 @@ export default function ContactSearchDialog({
     }
   }
 
+  /** Asks WeChat to resolve the typed ID before a friend request is sent. */
+  async function discover(): Promise<void> {
+    const keyword = queryRef.current.trim()
+    const account = accountIdRef.current
+    if (!keyword || !account || discoveringRef.current)
+      return
+    const token = ++discoveryTokenRef.current
+    discoveringRef.current = true
+    setDiscovering(true)
+    setDiscoveryError('')
+    try {
+      const result = await wechatApi.discoverContact(account, keyword)
+      if (token !== discoveryTokenRef.current)
+        return
+      setDiscovery(result)
+    }
+    catch (value) {
+      if (token !== discoveryTokenRef.current)
+        return
+      setDiscovery(null)
+      setDiscoveryError(describeDiscoveryError(value))
+    }
+    finally {
+      if (token === discoveryTokenRef.current) {
+        discoveringRef.current = false
+        setDiscovering(false)
+      }
+    }
+  }
+
+  async function sendRequest(): Promise<void> {
+    const current = discovery
+    const account = accountIdRef.current
+    const message = requestMessage.trim()
+    if (!account || !current || !message || sending)
+      return
+    setSending(true)
+    setSendError('')
+    const privacy: ContactPrivacySettings = chatsOnly
+      ? { chatsOnly: true, hideMyPosts: false, hideTheirPosts: false }
+      : { chatsOnly: false, hideMyPosts, hideTheirPosts }
+    try {
+      let operation = await wechatApi.sendContactRequest(account, {
+        recipientRef: current.recipientRef,
+        message,
+        privacy,
+      })
+      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+        await sleep(SYNC_POLL_INTERVAL)
+        operation = await wechatApi.getOperation(account, operation.id)
+      }
+      if (!isTerminalState(operation.state))
+        throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
+      if (operation.state !== 'succeeded')
+        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+      setSent(true)
+      setRequestOpen(false)
+      await loadContacts()
+    }
+    catch (value) {
+      setSendError(userFacingErrorMessage(value, '发送好友申请失败，请稍后重试。'))
+    }
+    finally {
+      setSending(false)
+    }
+  }
+
   function scheduleSearch(delay = SEARCH_DEBOUNCE_MS): void {
     if (searchTimerRef.current !== null)
       window.clearTimeout(searchTimerRef.current)
@@ -215,6 +330,9 @@ export default function ContactSearchDialog({
       return
     }
     if (event.key === 'Enter') {
+      // The greeting textarea keeps Enter for new lines.
+      if ((event.target as HTMLElement).tagName === 'TEXTAREA')
+        return
       event.preventDefault()
       if (contacts.length > 0)
         choose(contacts[0])
@@ -268,6 +386,8 @@ export default function ContactSearchDialog({
         searchTimerRef.current = null
       }
       requestTokenRef.current += 1
+      syncTokenRef.current += 1
+      discoveryTokenRef.current += 1
       return () => {
         for (const cleanup of cleanups)
           cleanup()
@@ -279,6 +399,7 @@ export default function ContactSearchDialog({
     setError('')
     setSyncStatus('')
     setSyncFailed(false)
+    resetDiscovery()
     // The field mounts after this effect; focus again on the next frame so the
     // click that opened the dialog cannot keep its own focus target.
     nextFrame(() => {
@@ -304,6 +425,7 @@ export default function ContactSearchDialog({
         window.clearTimeout(searchTimerRef.current)
       requestTokenRef.current += 1
       syncTokenRef.current += 1
+      discoveryTokenRef.current += 1
     }
   }, [])
 
@@ -363,6 +485,146 @@ export default function ContactSearchDialog({
         {error && <p className="contact-error">{t(error)}</p>}
 
         <p className="contact-source-note">{t('搜索结果来自已同步的通讯录，覆盖微信号、昵称、备注和备注名。')}</p>
+
+        {normalizedQuery && (
+          <section className="discovery">
+            {!discovery && !discovering && !discoveryError && (
+              <button type="button" className="discovery-trigger" onClick={() => void discover()}>
+                <Icon name="search" size={13} />
+                {t('在微信中搜索“{query}”', { query: normalizedQuery })}
+              </button>
+            )}
+            {discovering && (
+              <div className="discovery-status">
+                <Icon name="refresh" size={12} className="spin" />
+                {t('正在微信中搜索…')}
+              </div>
+            )}
+            {discoveryError && <div className="contact-error">{t(discoveryError)}</div>}
+
+            {discovery && (
+              <>
+                <div className="discovery-card">
+                  <ThreadAvatar
+                    accountId={accountId}
+                    name={discovery.displayName}
+                    username={discovery.recipientRef}
+                    size={38}
+                  />
+                  <span className="contact-meta">
+                    <span className="contact-name">{discovery.displayName}</span>
+                    <span className="contact-sub">{t('微信搜索结果')}</span>
+                  </span>
+                  {discovery.contactId
+                    ? (
+                        <button type="button" className="contact-action" onClick={() => onStartId(discovery.contactId!)}>
+                          {t('聊天')}
+                        </button>
+                      )
+                    : discovery.request
+                      ? (
+                          discovery.request.direction === 'incoming' && onOpenRequests
+                            ? (
+                                <button type="button" className="contact-action" onClick={onOpenRequests}>
+                                  {t('去处理')}
+                                </button>
+                              )
+                            : <span className="discovery-chip">{t(requestStatus(discovery.request))}</span>
+                        )
+                      : sent
+                        ? <span className="discovery-chip">{t('已发送申请')}</span>
+                        : (
+                            <button
+                              type="button"
+                              className="contact-action"
+                              onClick={() => setRequestOpen(open => !open)}
+                            >
+                              {t('添加好友')}
+                            </button>
+                          )}
+                </div>
+
+                {discovery.request?.direction === 'incoming' && (
+                  <p className="discovery-note">{t('对方已经申请添加你，在“好友申请”里通过即可。')}</p>
+                )}
+                {discovery.request?.direction === 'outgoing' && (
+                  <p className="discovery-note">{t('申请已发送，等待对方确认。')}</p>
+                )}
+                {sent && <p className="discovery-note">{t('好友申请已发送，等待对方确认。')}</p>}
+
+                {requestOpen && !discovery.contactId && !discovery.request && (
+                  <form
+                    className="discovery-form"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void sendRequest()
+                    }}
+                  >
+                    <textarea
+                      value={requestMessage}
+                      placeholder={t('填写验证申请，对方会看到这段话')}
+                      maxLength={4096}
+                      rows={3}
+                      disabled={sending}
+                      onChange={event => setRequestMessage(event.target.value)}
+                    />
+                    <div className="discovery-privacy">
+                      <label className="contact-radio">
+                        <input
+                          type="radio"
+                          name="discovery-privacy"
+                          checked={!chatsOnly}
+                          onChange={() => setChatsOnly(false)}
+                        />
+                        <span><strong>{t('全部可见')}</strong></span>
+                      </label>
+                      <label className="contact-radio">
+                        <input
+                          type="radio"
+                          name="discovery-privacy"
+                          checked={chatsOnly}
+                          onChange={() => setChatsOnly(true)}
+                        />
+                        <span><strong>{t('仅聊天')}</strong></span>
+                      </label>
+                      {!chatsOnly && (
+                        <div className="contact-switches">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={hideMyPosts}
+                            className={`privacy-switch${hideMyPosts ? ' on' : ''}`}
+                            onClick={() => setHideMyPosts(value => !value)}
+                          >
+                            <span>{t('不让对方看我的朋友圈')}</span>
+                            <i />
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={hideTheirPosts}
+                            className={`privacy-switch${hideTheirPosts ? ' on' : ''}`}
+                            onClick={() => setHideTheirPosts(value => !value)}
+                          >
+                            <span>{t('不看对方的朋友圈')}</span>
+                            <i />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {sendError && <div className="contact-error">{t(sendError)}</div>}
+                    <div className="discovery-form-actions">
+                      <button type="button" onClick={() => setRequestOpen(false)}>{t('取消')}</button>
+                      <button type="submit" disabled={sending || !requestMessage.trim()}>
+                        {t(sending ? '发送中…' : '发送申请')}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </>
+            )}
+          </section>
+        )}
 
         <div className="contact-results scrollbar-thin">
           {contacts.map(contact => (

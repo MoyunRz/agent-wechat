@@ -281,6 +281,18 @@ export function setRailView(railView: UiState['railView']): void {
   setUi({ railView })
 }
 
+/** Opens the contact detail card for one saved contact. */
+export function openContactEditor(contactId: string): void {
+  const id = contactId.trim()
+  if (id)
+    setUi({ contactEditorId: id })
+}
+
+/** Closes the contact detail card. */
+export function closeContactEditor(): void {
+  setUi({ contactEditorId: null })
+}
+
 /** Opens the image lightbox at the given source; null closes it. */
 export function setLightboxSrc(lightboxSrc: string | null): void {
   setMessages({ lightboxSrc })

@@ -94,6 +94,8 @@ export interface UiState {
   toastEnabled: boolean
   railView: RailView
   toasts: IncomingToast[]
+  /** Contact whose detail card is open; null when closed. */
+  contactEditorId: string | null
   /** Settings popover; kept in the store so a route can open it. */
   settingsOpen: boolean
 }
@@ -174,6 +176,7 @@ export const initialState: AppState = {
     toastEnabled: true,
     railView: 'chats',
     toasts: [],
+    contactEditorId: null,
     settingsOpen: false,
   },
 }

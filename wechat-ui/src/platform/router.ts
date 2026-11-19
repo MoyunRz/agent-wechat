@@ -33,6 +33,8 @@ function routeForState(): Route | null {
     return { name: 'new-chat', ...base }
   if (state.ui.railView === 'contacts')
     return { name: 'contacts', ...base }
+  if (state.ui.railView === 'requests')
+    return { name: 'requests', ...base }
   if (state.ui.railView === 'ai')
     return { name: 'chats', ...base }
   const threadId = state.threads.activeThreadId
@@ -92,6 +94,10 @@ export async function applyLocationHash(hash: string): Promise<boolean> {
     setContactDialogOpen(route.name === 'new-chat')
     if (route.name === 'contacts') {
       setRailView('contacts')
+      return true
+    }
+    if (route.name === 'requests') {
+      setRailView('requests')
       return true
     }
     setRailView('chats')

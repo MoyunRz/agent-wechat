@@ -15,6 +15,7 @@ export type RouteName =
   | 'media'
   | 'info'
   | 'contacts'
+  | 'requests'
   | 'new-chat'
   | 'settings'
 
@@ -28,6 +29,7 @@ export type Route =
   | { name: 'media', server: string, account: string, thread: string, message: string }
   | { name: 'info', server: string, account: string, thread: string }
   | { name: 'contacts', server: string, account: string }
+  | { name: 'requests', server: string, account: string }
   | { name: 'new-chat', server: string, account: string }
   | { name: 'settings', server: string, account: string }
 
@@ -52,6 +54,7 @@ export const routeTable: readonly RouteEntry[] = [
   { pattern: '/{server}/{account}/chats/{thread}/media/{message}', name: 'media', description: 'A conversation scrolled to one message; its media opens from the bubble.' },
   { pattern: '/{server}/{account}/chats/{thread}/info', name: 'info', description: 'Conversation details.' },
   { pattern: '/{server}/{account}/contacts', name: 'contacts', description: 'The contact list of an account.' },
+  { pattern: '/{server}/{account}/contacts/requests', name: 'requests', description: 'Incoming and sent friend-request conversations for one account.' },
   { pattern: '/{server}/{account}/new-chat', name: 'new-chat', description: 'The dialog for starting a conversation.' },
   { pattern: '/{server}/{account}/settings', name: 'settings', description: 'Settings for the app and the account.' },
 ]
