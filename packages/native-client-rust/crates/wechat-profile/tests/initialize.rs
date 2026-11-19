@@ -68,7 +68,7 @@ fn fresh_encrypted_layout_reopens_with_password_and_private_keys() {
     assert_eq!(reader.groups(&ListQuery::default()).unwrap().items.len(), 0);
     assert_eq!(
         verify_profile_password(&location, &keys, &[42; 32]).unwrap(),
-        9
+        8
     );
     assert!(matches!(
         verify_profile_password(&location, &keys, &[43; 32]),
@@ -206,7 +206,7 @@ fn new_profiles_use_wal_with_every_page_in_the_main_file() {
     }
     assert_eq!(
         verify_profile_password(&location, &keys, &[42; 32]).unwrap(),
-        9
+        8
     );
 }
 
