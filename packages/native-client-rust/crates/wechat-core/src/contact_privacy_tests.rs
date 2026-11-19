@@ -113,21 +113,32 @@ fn contact_privacy_optional_fields_preserve_existing_idempotency_inputs() {
 }
 
 #[test]
-fn contact_privacy_batch_uses_point_versions_and_omits_unavailable_ids() {
+fn contact_details_and_pages_share_the_point_privacy_version() {
     let (_temp, core) = super::super::groups::tests::fixture();
-    let ids = ["peer".to_owned(), "other".to_owned(), "missing".to_owned()];
     let peer = core.contact_privacy("one", "peer").unwrap();
-    let other = core.contact_privacy("one", "other").unwrap();
-    let batch = core.contact_privacy_snapshots("one", &ids).unwrap();
-    assert_eq!(batch, json!({"snapshots": {"peer": peer, "other": other}}));
+    let versioned = || core.catalog_item("one", "contacts", "peer").unwrap();
+    let page = core
+        .catalog_page("one", "contacts", None, &crate::CatalogQuery::default())
+        .unwrap();
+    let listed = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "peer")
+        .unwrap();
+    assert_eq!(listed["privacy"], peer["privacy"]);
+    assert_eq!(listed["privacyVersion"], peer["version"]);
+    assert_eq!(versioned()["privacyVersion"], peer["version"]);
+
     core.mark_partial_contact_privacy_pending("one", "peer", "test")
         .unwrap();
-    let batch = core.contact_privacy_snapshots("one", &ids).unwrap();
-    assert_eq!(batch, json!({"snapshots": {"other": other}}));
-    assert!(core.contact_privacy_snapshots("one", &[]).is_err());
+    assert!(versioned().get("privacy").is_none());
+    assert!(versioned().get("privacyVersion").is_none());
     assert!(core
-        .contact_privacy_snapshots("one", &vec!["peer".into(); 201])
-        .is_err());
+        .catalog_item("one", "contacts", "other")
+        .unwrap()
+        .get("privacy")
+        .is_some());
 }
 
 #[test]
@@ -1147,11 +1158,9 @@ fn remark_write_copies_a_fresh_record_and_saves_wechats_value_after_acceptance()
     // The saved remark comes from WeChat via a queued exact lookup, not optimistically.
     assert_eq!(core.store.contact_remark_refreshes("one").unwrap().len(), 1);
     assert!(core.remark_refresh_pending("one", "peer").unwrap());
-    // Until that lookup lands, further edits to the contact wait.
-    assert_eq!(
-        core.contact_privacy("one", "peer").unwrap_err().to_string(),
-        "contact_privacy_pending"
-    );
+    // The pending lookup doesn't hold up other edits; privacy stays readable
+    // with the same version.
+    assert!(core.contact_privacy("one", "peer").is_ok());
 }
 
 fn save_remark(core: &Core, remark: &str) {
@@ -1247,11 +1256,12 @@ fn queued_remark_and_privacy_edits_block_each_other_on_one_contact() {
 }
 
 #[test]
-fn contact_version_changes_with_the_saved_remark() {
+fn contact_version_ignores_the_saved_remark() {
+    // A remark lookup landing must not make a queued privacy edit stale.
     let (_temp, core) = super::super::groups::tests::fixture();
     let before = core.contact_privacy("one", "peer").unwrap()["version"].clone();
     save_remark(&core, "Saved");
-    assert_ne!(
+    assert_eq!(
         core.contact_privacy("one", "peer").unwrap()["version"],
         before
     );

@@ -18,6 +18,7 @@ pub struct CatalogQuery {
     pub cursor: Option<String>,
     pub search: Option<String>,
     pub thread_kind: Option<String>,
+    pub relation: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -165,6 +166,14 @@ impl Core {
         } else {
             self.classify_peers(std::slice::from_mut(&mut item), &reader)?;
         }
+        if kind == "contacts" {
+            self.add_contact_privacy(
+                account,
+                own.as_deref(),
+                &reader,
+                std::slice::from_mut(&mut item),
+            )?;
+        }
         Ok(item)
     }
     /// Whole-table rows for `contacts`/`groups`/`members`, reused across page
@@ -218,13 +227,22 @@ impl Core {
         {
             bail!("invalid_request");
         }
+        // Contacts default to the friend relationship and never mix in strangers
+        // unless the caller asks for them explicitly.
+        let relation = q.relation.as_deref().unwrap_or("friend");
+        if (kind != "contacts" && q.relation.is_some())
+            || !matches!(relation, "friend" | "non_contact" | "unknown" | "all")
+        {
+            bail!("invalid_request");
+        }
         let query = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(
                 kind,
                 subject,
                 &q.search,
-                &q.thread_kind
+                &q.thread_kind,
+                relation
             ))?)
         );
         let limit = q.limit.unwrap_or(50);
@@ -331,6 +349,10 @@ impl Core {
                 self.catalog_rows(account, kind, subject, &reader, own.as_deref(), None)?
             }
         };
+        let mut rows = rows;
+        if kind == "contacts" && relation != "all" {
+            rows.retain(|row| row["relation"] == relation);
+        }
         let metadata = json!({"sourceGeneration":reader.generation(),"coverage":reader.coverage(),"order":rows.iter().map(|r|r["id"].clone()).collect::<Vec<_>>()});
         let mut page = self.paginate_values(account, &query, q, rows, metadata)?;
         if kind == "threads" {
@@ -344,6 +366,14 @@ impl Core {
             self.classify_peers(
                 page["items"].as_array_mut().context("invalid page")?,
                 &reader,
+            )?;
+        }
+        if kind == "contacts" {
+            self.add_contact_privacy(
+                account,
+                own.as_deref(),
+                &reader,
+                page["items"].as_array_mut().context("invalid page")?,
             )?;
         }
         Ok(page)
@@ -577,7 +607,7 @@ impl Core {
                 }
                 "contacts" => {
                     let page = reader.contacts(&q)?;
-                    (page.items.into_iter().filter(|c|!c.is_group).map(|c|json!({"id":c.username,"username":c.username,"displayName":c.label,"nickname":c.nickname,"remark":c.remark,"alias":c.alias,"localType":c.local_type,"relation":"unknown","version":reader.generation()})).collect(),page.next_cursor)
+                    (page.items.into_iter().filter(|c|!c.is_group).map(|c|json!({"id":c.username,"username":c.username,"displayName":c.label,"nickname":c.nickname,"remark":c.remark,"alias":c.alias,"localType":c.local_type,"relation":crate::runtime::contact_requests::contact_relation(&c),"version":reader.generation()})).collect(),page.next_cursor)
                 }
                 "groups" => {
                     let page = reader.groups(&q)?;

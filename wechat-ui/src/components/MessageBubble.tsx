@@ -534,9 +534,15 @@ export default function MessageBubble({
       ? t('未成功，请稍后在通讯录里重试。')
       : t('拒绝失败，请稍后重试。')
     try {
+      // Resolve the canonical request row so the verified accept path can check
+      // its current version; the message card itself carries no request ID.
+      const page = await wechatApi.listContactRequests(account.id, { direction: 'incoming', limit: 200 })
+      const request = page.items.find(item => item.peerId === friendRequestCard.fromUsername)
+      if (!request)
+        throw new Error('contact_request_not_found')
       let operation = action === 'accept'
-        ? await wechatApi.acceptFriendRequest(account.id, friendRequestCard.fromUsername)
-        : await wechatApi.declineFriendRequest(account.id, friendRequestCard.fromUsername)
+        ? await wechatApi.acceptContactRequest(account.id, request.id, request.version)
+        : await wechatApi.deleteContactRequest(account.id, request.id, request.version)
       for (let attempt = 0; attempt < 20; attempt++) {
         if (['succeeded', 'failed', 'cancelled', 'expired'].includes(operation.state))
           break

@@ -174,18 +174,6 @@ export class NativeWeChatClient {
   }
   threads(accountId: string, options?: string | NativeListOptions): Promise<NativePage<NativeThread>> { return this.request(`v1/accounts/${id(accountId)}/threads${listQuery(options)}`); }
   contacts(accountId: string, options?: string | NativeListOptions, signal?: AbortSignal): Promise<NativePage<NativeContact>> { return this.request(`v1/accounts/${id(accountId)}/contacts${listQuery(options)}`, { signal }); }
-  /** Accept one inbound contact request by the encryptusername, ticket and scene it carried. The account's gate must be open. */
-  async acceptContactRequest(accountId: string, input: { encryptUsername: string; ticket: string; scene: number }, idempotencyKey: string, signal?: AbortSignal): Promise<NativeOperation> {
-    if (!idempotencyKey || idempotencyKey.length > 200 || /[\r\n]/.test(idempotencyKey)) throw new Error("An idempotency key is required");
-    if (typeof input?.encryptUsername !== "string" || !input.encryptUsername || input.encryptUsername.includes("\0") || input.encryptUsername.length > 512) throw new Error("Invalid contact-request encryptusername");
-    if (typeof input?.ticket !== "string" || !input.ticket || input.ticket.includes("\0") || input.ticket.length > 16384) throw new Error("Invalid contact-request ticket");
-    if (!Number.isSafeInteger(input?.scene) || input.scene < 0 || input.scene > 4294967295) throw new Error("Invalid contact-request scene");
-    const operation = await this.request<NativeOperation>(`v1/accounts/${id(accountId)}/contacts/verify-user/accept`, {
-      method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input), signal,
-    });
-    if (!operation || operation.accountId !== accountId || operation.kind !== "contact-request-accept" || typeof operation.id !== "string" || !operation.id || typeof operation.state !== "string") throw new Error("Native contact-request accept operation identity is invalid");
-    return operation;
-  }
   /** Open or close the account's contact-request acceptance gate. The gate starts closed. */
   setContactRequestGate(accountId: string, enabled: boolean): Promise<unknown> {
     if (typeof enabled !== "boolean") throw new Error("The gate state must be a boolean");

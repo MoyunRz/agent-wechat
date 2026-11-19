@@ -226,17 +226,50 @@ export type FriendRequest = {
   avatar?: string | null
 }
 
-/** 通讯录里待处理的「新的朋友」条目。 */
-export type PendingFriendRequest = {
+/** One saved verification-history entry of a contact request. */
+export type ContactRequestMessage = {
+  serverId: string
+  message: string
+  createdAt: number
+  direction: string
+}
+
+/**
+ * One per-peer friend-request conversation. The ID and version come from the
+ * daemon's canonical request rows; accept/delete send the version back as a
+ * precondition.
+ */
+export type ContactRequest = {
   id: string
-  username: string
-  nickname: string | null
-  alias: string | null
-  greeting: string | null
-  avatar?: string | null
-  hasScene?: boolean
-  scene?: number | null
-  createdAt?: string | null
+  peerId: string
+  displayName: string
+  direction: string
+  message: string
+  updatedAt: number
+  version: string
+  isContact: boolean
+  actionable: boolean
+  attention: boolean
+  state: string
+  history: ContactRequestMessage[]
+}
+
+export type ContactRequestPage = {
+  items: ContactRequest[]
+  nextCursor: string | null
+  sourceGeneration: string
+  coverage?: unknown
+  pendingIncomingCount: number
+  asOfEventCursor: string
+}
+
+/** A person discovered on WeChat before a friend request is sent. */
+export type ContactDiscovery = {
+  displayName: string
+  recipientRef: string
+  expiresAt: number
+  source: string
+  request: ContactRequest | null
 }
 
 /** 定向联系人查询（服务端 getcontact）返回的单条结果。 */
@@ -249,26 +282,6 @@ export type ContactLookupItem = {
 export type ContactLookupResponse = {
   items?: ContactLookupItem[]
   results?: number[]
-}
-
-/** 「通过好友申请」干跑校验结果。不含 ticket 等凭据，仅用于界面判断。 */
-export type FriendRequestPreflight = {
-  username: string
-  found: boolean
-  ready: boolean
-  dryRun: boolean
-  opcode?: number
-  scene?: number | null
-  nickname?: string | null
-  alias?: string | null
-  greeting?: string | null
-  v3?: string | null
-  v4?: string | null
-  hasV3?: boolean
-  hasV4?: boolean
-  needsTicketRefresh?: boolean
-  gateOpen?: boolean
-  blocking: string[]
 }
 
 export type Message = {

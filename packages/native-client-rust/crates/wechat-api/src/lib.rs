@@ -840,6 +840,7 @@ impl PageQuery {
             cursor: self.cursor.clone(),
             search: self.search.clone(),
             thread_kind: self.kind.clone(),
+            relation: None,
         })
     }
     fn profile(&self) -> ApiResult<wechat_profile::ListQuery> {

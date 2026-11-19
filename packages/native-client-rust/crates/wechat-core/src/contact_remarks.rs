@@ -126,6 +126,8 @@ impl Core {
             .collect())
     }
     /// The queue key for a contact, to test membership in `remark_refresh_pending_set`.
+    // Used by the remark poll worker; the card autosave UI wires it next.
+    #[allow(dead_code)]
     pub(super) fn remark_refresh_key(contact: &str) -> String {
         key(contact)
     }

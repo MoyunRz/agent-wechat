@@ -50,6 +50,22 @@ pub trait PushConnection: Send {
 /// Simulation implements decoded operations explicitly. All remaining native
 /// operations fail closed through `native`, including secondary media paths.
 pub trait Upstream: Send + Sync {
+    /// Contact edits (privacy, remark, removal, friend requests) as raw service replies.
+    fn contact_rpc_raw(
+        &self,
+        _state: &mut AccountState,
+        _request: &wechat_protocol::ContactRpc,
+    ) -> Result<Vec<u8>> {
+        bail!(
+            "{}",
+            if self.kind() == UpstreamKind::Simulator {
+                "unsupported_simulator_operation"
+            } else {
+                "account_runtime_required"
+            }
+        )
+    }
+
     fn kind(&self) -> UpstreamKind;
     /// Native account dispatch is supplied by Core; simulators implement decoded operations.
     fn uses_account_owner(&self) -> bool {

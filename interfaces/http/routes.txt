@@ -10,8 +10,8 @@ request AccountSettings.proactiveCache.image | boolean, required | Download and 
 request AccountSettings.proactiveCache.sticker | boolean, required | Download and cache received stickers and emoji. The default is true.
 request AccountSettings.proactiveCache.video | boolean, required | Download and cache received videos. The default is true.
 request AccountSettings.proactiveCache.voice | boolean, required | Download and cache received voice notes. The default is true.
-request ContactLookupRequest | object, rejects unknown fields | Request to look up one or two contacts live on WeChat.
-request ContactLookupRequest.ids | array of string, required | One or two distinct contact IDs to look up.
+request ContactLookupRequest | object, rejects unknown fields | Request to look up several contacts.
+request ContactLookupRequest.ids | array of string, required | Contact IDs to look up.
 request ContactMutationKeyQuery | object, rejects unknown fields | Original key for inspecting a contact mutation.
 request ContactMutationKeyQuery.key | string, required | Original submitted idempotency key.
 request ContentQuery | object, rejects unknown fields | Options for fetching media bytes.
@@ -73,6 +73,10 @@ request NativeContactRequestQuery.limit | integer, nullable, min 0, format uint 
 request NativeContactRequestQuery.search | string, nullable | Match saved labels, peer identities or verification text.
 request NativeContactRequestSend | object, rejects unknown fields | Send one greeting to a resolved person.
 request NativeContactRequestSend.message | string, required | Greeting supplied by the owner; no automatic default is inserted.
+request NativeContactRequestSend.privacy | object, nullable, rejects unknown fields | Initial relationship privacy; omission keeps the supported default.
+request NativeContactRequestSend.privacy.chatsOnly | boolean, required | Restrict this relationship to chats.
+request NativeContactRequestSend.privacy.hideMyPosts | boolean, required | Hide this account's Moments posts from this person.
+request NativeContactRequestSend.privacy.hideTheirPosts | boolean, required | Hide this person's Moments posts from this account.
 request NativeContactRequestSend.recipientRef | string, required | Exact reference returned by discovery on this account.
 request NativeContactRequestVersion | object, rejects unknown fields | Precondition for accepting or locally deleting the inspected request.
 request NativeContactRequestVersion.expectedVersion | string, required | Current request version returned by get/list.
@@ -309,7 +313,7 @@ response NativeContact.privacy.hideTheirPosts | boolean, required | Hide this pe
 response NativeContact.privacyPending | boolean, nullable | True while an accepted relationship edit is awaiting contact sync.
 response NativeContact.privacyUnavailable | string, nullable | Why a friend has no `privacy` or `privacyVersion`, so it can't be edited yet: `contact_privacy_unresolved` (refresh the contact), `ordinary_contact_required` (not supported for this contact), `profile_identity_unavailable` or `contact_flags_unresolved`.
 response NativeContact.privacyVersion | string, nullable | Version to send as `expectedVersion` when changing this contact's privacy or remark. It changes whenever either of them changes.
-response NativeContact.relation | string, required | Relationship evidence: `friend` when membership is established, `non_contact` when known flags do not establish membership, or `unknown` when flags are unavailable.
+response NativeContact.relation | string, required | Relationship to this account. It currently always reports `unknown`, including for saved friends.
 response NativeContact.remark | string, required, nullable | Your private name for the contact. Null when none is saved.
 response NativeContact.remarkPending | boolean, nullable | True while an accepted remark change is waiting for WeChat's saved value.
 response NativeContact.username | string, required | The contact's WeChat username.
@@ -348,7 +352,7 @@ response NativeContactPage.items[]<NativeContact>.privacy.hideTheirPosts | boole
 response NativeContactPage.items[]<NativeContact>.privacyPending | boolean, nullable | True while an accepted relationship edit is awaiting contact sync.
 response NativeContactPage.items[]<NativeContact>.privacyUnavailable | string, nullable | Why a friend has no `privacy` or `privacyVersion`, so it can't be edited yet: `contact_privacy_unresolved` (refresh the contact), `ordinary_contact_required` (not supported for this contact), `profile_identity_unavailable` or `contact_flags_unresolved`.
 response NativeContactPage.items[]<NativeContact>.privacyVersion | string, nullable | Version to send as `expectedVersion` when changing this contact's privacy or remark. It changes whenever either of them changes.
-response NativeContactPage.items[]<NativeContact>.relation | string, required | Relationship evidence: `friend` when membership is established, `non_contact` when known flags do not establish membership, or `unknown` when flags are unavailable.
+response NativeContactPage.items[]<NativeContact>.relation | string, required | Relationship to this account. It currently always reports `unknown`, including for saved friends.
 response NativeContactPage.items[]<NativeContact>.remark | string, required, nullable | Your private name for the contact. Null when none is saved.
 response NativeContactPage.items[]<NativeContact>.remarkPending | boolean, nullable | True while an accepted remark change is waiting for WeChat's saved value.
 response NativeContactPage.items[]<NativeContact>.username | string, required | The contact's WeChat username.
@@ -921,7 +925,6 @@ route GET /v1/status | scope read, response NativeStatus, sdk response NativeSta
 route GET /v1/tokens | scope owner token, response untyped | List the API tokens that have been issued, without their secret values.
 route PATCH /v1/accounts/{a} | scope admin, request UpdateAccountRequest, response untyped | Change an account alias or whether it connects automatically when the daemon starts.
 route PATCH /v1/accounts/{a}/contacts/{id} | scope admin, idempotency key required, request NativeContactUpdate, response NativeOperation, status 202, sdk response NativeOperation | Change relationship privacy or the remark against the inspected version.
-route PATCH /v1/accounts/{a}/custom-stickers/{id} | scope send, idempotency key required, request MoveCustomStickerRequest, response MediaJob, status 202, sdk request MoveCustomStickerRequest, sdk response MediaJob | Change Saved placement using If-Match and a relative anchor.
 route PATCH /v1/accounts/{a}/groups/{id} | scope admin, idempotency key required, request NativeGroupNameRequest, response NativeOperation, status 202, sdk response NativeOperation | Rename a group.
 route PATCH /v1/accounts/{a}/settings | scope media, request AccountSettings, response AccountSettings, sdk request AccountSettings, sdk response AccountSettings | Replace the account settings, such as the largest file to download automatically.
 route POST /v1/access-tokens | scope owner token, request TokenRequest, response untyped | Create an API token limited to chosen accounts and scopes. The secret token value is returned only in this response.

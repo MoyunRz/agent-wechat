@@ -2,8 +2,10 @@ import type {
   AccountSettings,
   AccountSummary,
   Contact,
+  ContactDiscovery,
   ContactLookupResponse,
-  FriendRequestPreflight,
+  ContactRequest,
+  ContactRequestPage,
   GroupMember,
   ListResponse,
   LoginAttempt,
@@ -15,7 +17,6 @@ import type {
   Message,
   Operation,
   OwnedMediaSource,
-  PendingFriendRequest,
   PurgedMediaCache,
   SendIntent,
   TextMentions,
@@ -437,35 +438,58 @@ export const wechatApi = {
     )
   },
 
-  /** 待处理的好友申请（微信「新的朋友」）。只读，不包含通过/忽略操作。 */
-  async listFriendRequests(accountId: string): Promise<ListResponse<PendingFriendRequest>> {
-    return request<ListResponse<PendingFriendRequest>>(`/accounts/${enc(accountId)}/friend-requests`)
+  /**
+   * Saved friend-request conversations, newest first. `actionable` marks the
+   * incoming rows the daemon can accept right now; `version` is the accept
+   * precondition.
+   */
+  async listContactRequests(
+    accountId: string,
+    options: { direction?: 'incoming' | 'outgoing', actionable?: boolean, limit?: number, cursor?: string } = {},
+  ): Promise<ContactRequestPage> {
+    const params = new URLSearchParams()
+    if (options.direction)
+      params.set('direction', options.direction)
+    if (options.actionable)
+      params.set('actionable', 'true')
+    if (options.limit)
+      params.set('limit', String(Math.min(options.limit, 200)))
+    if (options.cursor)
+      params.set('cursor', options.cursor)
+    const suffix = params.size > 0 ? `?${params.toString()}` : ''
+    return request<ContactRequestPage>(`/accounts/${enc(accountId)}/contact-requests${suffix}`)
   },
 
-  /** 干跑校验通过好友申请所需的参数；不向微信服务器发送任何请求。 */
-  async preflightFriendRequest(accountId: string, username: string): Promise<FriendRequestPreflight> {
-    return request<FriendRequestPreflight>(
-      `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/preflight`,
+  getContactRequest(accountId: string, id: string): Promise<ContactRequest> {
+    return request<ContactRequest>(`/accounts/${enc(accountId)}/contact-requests/${enc(id)}`)
+  },
+
+  /** Accept the inspected request version; the daemon re-checks it before sending. */
+  acceptContactRequest(accountId: string, id: string, expectedVersion: string): Promise<Operation> {
+    return jsonRequest<Operation>(
+      `/accounts/${enc(accountId)}/contact-requests/${enc(id)}/accept`,
+      'POST',
+      { expectedVersion },
+      { 'Idempotency-Key': idempotencyKey('contact-accept') },
     )
   },
 
-  /** 通过一位申请人的最新好友申请；申请材料由 hub 从落库消息中读取，前端不经手。 */
-  acceptFriendRequest(accountId: string, username: string): Promise<Operation> {
+  /** Delete the local request conversation; this does not reject or cancel it on WeChat. */
+  deleteContactRequest(accountId: string, id: string, expectedVersion: string): Promise<Operation> {
     return jsonRequest<Operation>(
-      `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/accept`,
-      'POST',
-      {},
-      { 'Idempotency-Key': idempotencyKey('friend-accept') },
+      `/accounts/${enc(accountId)}/contact-requests/${enc(id)}`,
+      'DELETE',
+      { expectedVersion },
+      { 'Idempotency-Key': idempotencyKey('contact-request-delete') },
     )
   },
 
-  /** 拒绝一位申请人的最新好友申请；申请材料由 hub 从落库消息中读取，前端不经手。 */
-  declineFriendRequest(accountId: string, username: string): Promise<Operation> {
-    return jsonRequest<Operation>(
-      `/accounts/${enc(accountId)}/friend-requests/${enc(username)}/decline`,
+  /** Discover a WeChat ID on the server before sending a friend request. */
+  discoverContact(accountId: string, query: string): Promise<ContactDiscovery> {
+    return jsonRequest<ContactDiscovery>(
+      `/accounts/${enc(accountId)}/search/contacts`,
       'POST',
-      {},
-      { 'Idempotency-Key': idempotencyKey('friend-decline') },
+      { query },
     )
   },
 

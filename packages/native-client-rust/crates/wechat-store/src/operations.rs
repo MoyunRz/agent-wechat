@@ -14,7 +14,7 @@ pub(crate) fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 /// The account `control.sqlite` schema version after every migration.
-pub(crate) const ACCOUNT_SCHEMA_VERSION: i64 = 14;
+pub(crate) const ACCOUNT_SCHEMA_VERSION: i64 = 15;
 pub fn unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -337,6 +337,11 @@ impl Store {
             tx.execute_batch(include_str!(
                 "../migrations/account/V014__contact_mutations.sql"
             ))?;
+            tx.commit()?;
+        }
+        if version < 15 {
+            let tx = db.transaction()?;
+            tx.execute_batch(include_str!("../migrations/account/V015__retired_keys.sql"))?;
             tx.commit()?;
         }
         Ok(())
@@ -1330,7 +1335,7 @@ mod runtime_prefix_tests {
             .stage_sync("test", "old", b"old sealed commands", b"message cursor")
             .unwrap();
         store.control("test", |db| {
-            db.execute_batch("ALTER TABLE media_assets DROP COLUMN payload_file;ALTER TABLE media_assets DROP COLUMN profile_key;ALTER TABLE media_sources DROP COLUMN payload_file;DROP TABLE call_actions;DROP TABLE call_sessions;DROP INDEX apply_intents_stream;ALTER TABLE apply_intents DROP COLUMN stream;DROP TABLE contact_mutations;PRAGMA user_version=7;")?;
+            db.execute_batch("ALTER TABLE media_assets DROP COLUMN payload_file;ALTER TABLE media_assets DROP COLUMN profile_key;ALTER TABLE media_sources DROP COLUMN payload_file;DROP TABLE call_actions;DROP TABLE call_sessions;DROP INDEX apply_intents_stream;ALTER TABLE apply_intents DROP COLUMN stream;DROP TABLE contact_mutations;DROP TABLE retired_keys;PRAGMA user_version=7;")?;
             Ok(())
         }).unwrap();
         drop(store);

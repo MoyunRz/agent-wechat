@@ -394,7 +394,7 @@ pub(crate) const ROUTES: &[Route] = &[
     Route {
         method: "POST",
         path: "/v1/accounts/{a}/contacts/verify-user/accept",
-        id: "acceptContactRequest",
+        id: "acceptVerifyUserRequest",
         tag: "contacts",
         scope: Scope::One("send"),
         idempotency: Idempotency::Required,

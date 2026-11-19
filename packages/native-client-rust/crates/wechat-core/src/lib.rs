@@ -2,6 +2,7 @@
 mod account_network;
 mod business_contacts;
 pub mod call_types;
+mod contact_privacy_state;
 
 pub mod calls;
 mod format;

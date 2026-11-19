@@ -10,7 +10,7 @@ import { wechatApi, WechatApiError } from '../api'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
-import type { Contact, FriendRequestPreflight, Operation, PendingFriendRequest } from '../types'
+import type { Contact, ContactRequest, Operation } from '../types'
 import {
   loadContactDirectory,
   refreshContactAuthoritative,
@@ -35,33 +35,7 @@ const FRIEND_REQUEST_POLL_INTERVAL = 20_000
 // WeCom entries; these categories are never shown as personal contacts.
 const NON_PERSONAL_CATEGORIES = new Set(['system', 'business', 'openim', 'openimCustomerService', 'group'])
 
-const SCENE_LABELS: Record<number, string> = {
-  3: '通过微信号搜索',
-  12: '通过 QQ 号添加',
-  14: '通过群聊添加',
-  15: '通过手机号搜索',
-  25: '通过好友名片添加',
-  30: '通过二维码添加',
-  33: '通过通讯录添加',
-}
-
-const BLOCKING_LABELS: Record<string, string> = {
-  not_pending: '申请已失效',
-  already_handled: '申请已处理',
-  encrypt_username_missing: '缺少加密用户名',
-  ticket_missing: '缺少确认票据',
-  missing_scene: '缺少来源信息，请在手机上处理',
-  already_friends: '你们已经是好友了',
-  gate_closed: '通过开关未开启',
-}
-
 const SKELETON_ROWS = [0, 1, 2, 3, 4, 5]
-
-interface PreflightState {
-  loading: boolean
-  result?: FriendRequestPreflight
-  error?: string
-}
 
 interface ContactGroup {
   key: string
@@ -152,17 +126,28 @@ function contactMatches(
   return fields.some(field => (field ?? '').trim().toLowerCase().includes(keyword))
 }
 
-function requestName(item: PendingFriendRequest): string {
-  return item.nickname?.trim() || item.alias?.trim() || item.username || item.id
+function requestName(item: ContactRequest): string {
+  return item.displayName?.trim() || item.peerId || item.id
 }
 
-function formatRequestTime(value: string | null | undefined): string {
+function formatRequestTime(value: number | null | undefined): string {
   if (!value)
     return '未知'
-  const time = new Date(value)
+  const time = new Date(value * 1000)
   if (Number.isNaN(time.getTime()))
-    return value
+    return '未知'
   return time.toLocaleString('zh-CN', { hour12: false })
+}
+
+/** Why a request row cannot be accepted right now. */
+function requestStatus(item: ContactRequest): string {
+  if (item.actionable)
+    return '申请可处理'
+  if (item.isContact || item.state === 'contact')
+    return '你们已经是好友了'
+  if (item.state === 'request_sent')
+    return '等待对方确认'
+  return '申请已处理'
 }
 
 function describeSyncError(value: unknown): string {
@@ -199,10 +184,10 @@ export default function ContactsPanel() {
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   const [syncFailed, setSyncFailed] = useState(false)
-  const [friendRequests, setFriendRequests] = useState<PendingFriendRequest[]>([])
-  const [preflightStates, setPreflightStates] = useState<Record<string, PreflightState>>({})
+  const [friendRequests, setFriendRequests] = useState<ContactRequest[]>([])
   const [accepting, setAccepting] = useState<Record<string, boolean>>({})
-  const [detailRequest, setDetailRequest] = useState<PendingFriendRequest | null>(null)
+  const [requestError, setRequestError] = useState('')
+  const [detailRequest, setDetailRequest] = useState<ContactRequest | null>(null)
   // Contact folds open by default; the other categories start collapsed, as in
   // the Linux client.
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -221,7 +206,6 @@ export default function ContactsPanel() {
   const loadingRef = useRef(true)
   const syncingRef = useRef(false)
   const syncStatusRef = useRef('')
-  const preflightRef = useRef<Record<string, PreflightState>>({})
   const acceptingRef = useRef<Record<string, boolean>>({})
   const accountIdRef = useRef(accountId)
 
@@ -243,14 +227,8 @@ export default function ContactsPanel() {
     setSyncStatus(value)
   }
 
-  function patchPreflight(username: string, state: PreflightState): void {
-    const next = { ...preflightRef.current, [username]: state }
-    preflightRef.current = next
-    setPreflightStates(next)
-  }
-
-  function patchAccepting(username: string, value: boolean): void {
-    const next = { ...acceptingRef.current, [username]: value }
+  function patchAccepting(id: string, value: boolean): void {
+    const next = { ...acceptingRef.current, [id]: value }
     acceptingRef.current = next
     setAccepting(next)
   }
@@ -273,15 +251,16 @@ export default function ContactsPanel() {
     }
   }, [])
 
-  /** Reads the pending friend requests. Older hubs have no such route; the list
-   *  then stays empty without affecting the directory itself. */
+  /** Reads incoming request conversations from the daemon's canonical rows.
+   *  A hub without the route leaves the section empty. */
   const loadFriendRequests = useCallback(async (): Promise<void> => {
     const account = accountIdRef.current
     if (!account)
       return
     try {
-      const response = await wechatApi.listFriendRequests(account)
-      setFriendRequests(response.items ?? [])
+      const page = await wechatApi.listContactRequests(account, { direction: 'incoming', limit: 50 })
+      setFriendRequests(page.items ?? [])
+      setRequestError('')
     }
     catch {
       setFriendRequests([])
@@ -439,92 +418,32 @@ export default function ContactsPanel() {
     return rows
   }, [normalizedQuery, searchResults, contactGroups, expandedGroups])
 
-  function stateOf(item: PendingFriendRequest): PreflightState | undefined {
-    return preflightStates[item.username]
-  }
-
-  function sceneLabel(item: PendingFriendRequest): string {
-    const scene = item.scene
-    if (scene == null)
-      return t('来源未知')
-    const mapped: string | undefined = SCENE_LABELS[scene]
-    return mapped ? t(mapped) : t('来源 scene {scene}', { scene })
-  }
-
-  function preflightLabel(result: FriendRequestPreflight): string {
-    if (result.ready)
-      return t('申请可处理')
-    if (!result.found)
-      return t('申请已失效')
-    const reasons = result.blocking.map(reason => t(BLOCKING_LABELS[reason] ?? reason))
-    return reasons.length > 0 ? `${t('暂不可通过：')}${reasons.join(t('、'))}` : t('参数不完整')
-  }
-
-  /** Text of the preflight result; an empty string hides the status line. */
-  function resultLabel(item: PendingFriendRequest): string {
-    const state = stateOf(item)
-    if (state?.result)
-      return preflightLabel(state.result)
-    return state?.error ? t(state.error) : ''
-  }
-
-  function resultClass(item: PendingFriendRequest): string {
-    const state = stateOf(item)
-    return state?.result?.ready ? 'ready' : 'blocked'
-  }
-
-  /**
-   * Dry-run check: reads the local parameters and validates them without
-   * sending anything to the WeChat servers.
-   */
-  async function checkRequest(item: PendingFriendRequest): Promise<void> {
-    const account = accountIdRef.current
-    if (!account || preflightRef.current[item.username]?.loading)
-      return
-    patchPreflight(item.username, { loading: true })
-    try {
-      const result = await wechatApi.preflightFriendRequest(account, item.username)
-      patchPreflight(item.username, { loading: false, result })
-    }
-    catch (value) {
-      patchPreflight(item.username, {
-        loading: false,
-        error: userFacingErrorMessage(value, '检查失败，请稍后重试。'),
-      })
-    }
-  }
-
-  function openDetail(item: PendingFriendRequest): void {
+  function openDetail(item: ContactRequest): void {
+    setRequestError('')
     setDetailRequest(item)
-    if (!preflightRef.current[item.username])
-      void checkRequest(item)
   }
 
   function closeDetail(): void {
     setDetailRequest(null)
   }
 
-  function acceptDisabled(item: PendingFriendRequest): boolean {
-    if (acceptingRef.current[item.username])
-      return true
-    const result = preflightRef.current[item.username]?.result
-    // Only disable when the check already proved the request cannot pass; an
-    // unchecked request stays enabled and the server validates it.
-    return result != null && !result.ready && result.found
+  function acceptDisabled(item: ContactRequest): boolean {
+    return acceptingRef.current[item.id] === true || !item.actionable
   }
 
-  /** Accepts or declines a request; the hub reads the material from the stored
-   *  message and the list refreshes once the operation settles. */
-  async function actOnRequest(item: PendingFriendRequest, action: 'accept' | 'decline'): Promise<void> {
+  /** Accepts the inspected request version through the verified contact-request
+   *  path, or deletes the local conversation when the owner ignores it. */
+  async function actOnRequest(item: ContactRequest, action: 'accept' | 'delete'): Promise<void> {
     const account = accountIdRef.current
-    if (!account || acceptingRef.current[item.username])
+    if (!account || acceptingRef.current[item.id])
       return
-    patchAccepting(item.username, true)
-    const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '拒绝好友申请失败，请稍后重试。'
+    patchAccepting(item.id, true)
+    setRequestError('')
+    const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '删除申请记录失败，请稍后重试。'
     try {
       let operation = action === 'accept'
-        ? await wechatApi.acceptFriendRequest(account, item.username)
-        : await wechatApi.declineFriendRequest(account, item.username)
+        ? await wechatApi.acceptContactRequest(account, item.id, item.version)
+        : await wechatApi.deleteContactRequest(account, item.id, item.version)
       for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
         await sleep(SYNC_POLL_INTERVAL)
         operation = await wechatApi.getOperation(account, operation.id)
@@ -533,18 +452,14 @@ export default function ContactsPanel() {
         throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
       if (operation.state !== 'succeeded')
         throw new WechatApiError('操作未成功，请稍后重试。', 0)
-      patchPreflight(item.username, { loading: false })
       setDetailRequest(null)
       await Promise.all([loadDirectory(true), loadFriendRequests()])
     }
     catch (value) {
-      patchPreflight(item.username, {
-        loading: false,
-        error: userFacingErrorMessage(value, failing),
-      })
+      setRequestError(userFacingErrorMessage(value, failing))
     }
     finally {
-      patchAccepting(item.username, false)
+      patchAccepting(item.id, false)
     }
   }
 
@@ -686,6 +601,7 @@ export default function ContactsPanel() {
               {t('新的朋友')}
               <span className="friend-requests-count">{friendRequests.length}</span>
             </h3>
+            {requestError && <div className="contacts-status error">{t(requestError)}</div>}
             {friendRequests.map(item => (
               <div key={item.id} className="request-row">
                 <button
@@ -697,13 +613,12 @@ export default function ContactsPanel() {
                   <ThreadAvatar
                     accountId={accountId}
                     name={requestName(item)}
-                    username={item.username}
-                    imageUrl={item.avatar ?? null}
+                    username={item.peerId}
                     size={40}
                   />
                   <span className="request-main">
                     <span className="request-name">{requestName(item)}</span>
-                    <span className="request-sub">{t(item.greeting || '请求添加你为朋友')}</span>
+                    <span className="request-sub">{t(item.message || '请求添加你为朋友')}</span>
                   </span>
                 </button>
                 <span className="request-actions">
@@ -712,7 +627,7 @@ export default function ContactsPanel() {
                     className="request-accept"
                     onClick={() => openDetail(item)}
                   >
-                    {t('查看')}
+                    {t(item.actionable ? '查看' : requestStatus(item))}
                   </button>
                 </span>
               </div>
@@ -821,40 +736,39 @@ export default function ContactsPanel() {
               <ThreadAvatar
                 accountId={accountId}
                 name={requestName(detailRequest)}
-                username={detailRequest.username}
-                imageUrl={detailRequest.avatar ?? null}
+                username={detailRequest.peerId}
                 size={72}
               />
               <div className="detail-id">
                 <span className="detail-name">{requestName(detailRequest)}</span>
-                <span className="detail-source">{sceneLabel(detailRequest)}</span>
+                <span className="detail-source">{detailRequest.peerId}</span>
               </div>
             </div>
             <div className="detail-body">
-              {detailRequest.greeting && (
+              {detailRequest.message && (
                 <div className="detail-greeting">
                   <span className="detail-label">{t('申请消息')}</span>
-                  <p>{detailRequest.greeting}</p>
+                  <p>{detailRequest.message}</p>
                 </div>
               )}
               <div className="detail-meta">
                 <span className="detail-label">{t('申请时间')}</span>
-                <span>{t(formatRequestTime(detailRequest.createdAt))}</span>
+                <span>{t(formatRequestTime(detailRequest.updatedAt))}</span>
               </div>
-              {stateOf(detailRequest) && (
-                <div className={`detail-status ${resultClass(detailRequest)}`}>
-                  {resultLabel(detailRequest)}
-                </div>
-              )}
+              <div className={`detail-status ${detailRequest.actionable ? 'ready' : 'blocked'}`}>
+                {t(requestStatus(detailRequest))}
+              </div>
+              {requestError && <div className="detail-status blocked">{t(requestError)}</div>}
             </div>
             <div className="detail-actions">
               <button
                 type="button"
                 className="detail-decline"
-                disabled={acceptDisabled(detailRequest)}
-                onClick={() => void actOnRequest(detailRequest, 'decline')}
+                disabled={accepting[detailRequest.id] === true}
+                title={t('只删除本地申请记录，不会通知对方')}
+                onClick={() => void actOnRequest(detailRequest, 'delete')}
               >
-                {t(accepting[detailRequest.username] ? '处理中' : '拒绝')}
+                {t(accepting[detailRequest.id] ? '处理中' : '删除')}
               </button>
               <button
                 type="button"
@@ -862,7 +776,7 @@ export default function ContactsPanel() {
                 disabled={acceptDisabled(detailRequest)}
                 onClick={() => void actOnRequest(detailRequest, 'accept')}
               >
-                {t(accepting[detailRequest.username] ? '处理中' : '同意')}
+                {t(accepting[detailRequest.id] ? '处理中' : '同意')}
               </button>
             </div>
           </div>

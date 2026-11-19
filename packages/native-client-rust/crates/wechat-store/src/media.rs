@@ -87,7 +87,7 @@ pub(crate) fn read_job(db: &Connection, id: &str) -> Result<MediaJobRecord> {
         updated_at: row.11,
     })
 }
-fn read_asset(db: &Connection, id: &str) -> Result<MediaAssetRecord> {
+pub(crate) fn read_asset(db: &Connection, id: &str) -> Result<MediaAssetRecord> {
     // Metadata and authorization checks must not materialize attachment BLOBs.
     let row = db.query_row(
         "SELECT id,message_id,variant,kind,metadata_json,plan FROM media_assets WHERE id=?1",
@@ -141,7 +141,7 @@ fn job_changed(old: &MediaJobRecord, new: &MediaJobRecord) -> bool {
         || old.error_code != new.error_code
         || old.data != new.data
 }
-fn job_event(tx: &Connection, account: &str, row: &MediaJobRecord) -> Result<()> {
+pub(crate) fn job_event(tx: &Connection, account: &str, row: &MediaJobRecord) -> Result<()> {
     if let Some(id) = row.data["assetId"].as_str() {
         let metadata: Option<String> = tx
             .query_row(

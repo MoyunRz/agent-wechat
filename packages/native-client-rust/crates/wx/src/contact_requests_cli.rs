@@ -31,14 +31,19 @@ pub async fn requests(
         ContactRequestCommand::Send {
             recipient_ref,
             message,
+            privacy,
             options,
         } => {
+            let mut body = json!({"recipientRef":recipient_ref,"message":message});
+            if let Some(value) = privacy_value(privacy) {
+                body["privacy"] = value;
+            }
             client_actions::mutation(
                 r,
                 config,
                 reqwest::Method::POST,
                 "contact-requests",
-                json!({"recipientRef":recipient_ref,"message":message}),
+                body,
                 options,
             )
             .await
@@ -46,14 +51,19 @@ pub async fn requests(
         ContactRequestCommand::Accept {
             id,
             expected_version,
+            privacy,
             options,
         } => {
+            let mut body = json!({"expectedVersion":expected_version});
+            if let Some(value) = privacy_value(privacy) {
+                body["privacy"] = value;
+            }
             client_actions::mutation(
                 r,
                 config,
                 reqwest::Method::POST,
                 &format!("contact-requests/{}/accept", encode(&id)),
-                json!({"expectedVersion":expected_version}),
+                body,
                 options,
             )
             .await

@@ -393,6 +393,19 @@ enum ResourceAction {
 }
 #[derive(Subcommand)]
 enum ContactCommand {
+    /// List saved contacts with optional pagination.
+    List {
+        /// Return at most this many items.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Include all cached people, even non-contacts and unknown relationships.
+        #[arg(long)]
+        all: bool,
+        /// Continue from the next-page cursor of the previous result.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+
     /// Discover a person on WeChat by WeChat ID. Phone lookup is unverified.
     Search {
         /// Discovery query, distinct from local contacts find.
@@ -482,6 +495,7 @@ enum ContactRequestCommand {
         id: String,
     },
     /// Send one friend request using an opaque result from contacts search.
+    /// When any privacy flag is supplied, omitted privacy flags default to false.
     Send {
         /// Exact recipientRef from discovery on this account.
         recipient_ref: String,
@@ -489,15 +503,20 @@ enum ContactRequestCommand {
         #[arg(long)]
         message: String,
         #[command(flatten)]
+        privacy: ContactPrivacyOptions,
+        #[command(flatten)]
         options: MutationOptions,
     },
     /// Accept the exact inspected version of an incoming request.
+    /// When any privacy flag is supplied, omitted privacy flags default to false.
     Accept {
         /// Request ID from list/get.
         id: String,
         /// Current version returned by list/get.
         #[arg(long)]
         expected_version: String,
+        #[command(flatten)]
+        privacy: ContactPrivacyOptions,
         #[command(flatten)]
         options: MutationOptions,
     },
@@ -531,15 +550,6 @@ enum CatalogCommand {
         /// Seconds to wait for completion; the work keeps running after the wait ends.
         #[arg(long, default_value_t = 30)]
         wait: u64,
-    },
-    /// List saved entries with optional pagination.
-    List {
-        /// Return at most this many items.
-        #[arg(long)]
-        limit: Option<usize>,
-        /// Continue from the next-page cursor of the previous result.
-        #[arg(long)]
-        cursor: Option<String>,
     },
     /// Show a saved entry by ID.
     Get {
@@ -662,6 +672,16 @@ struct MutationOptions {
 }
 #[derive(Subcommand)]
 enum GroupCommand {
+    /// List saved entries with optional pagination.
+    List {
+        /// Return at most this many items.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Continue from the next-page cursor of the previous result.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+
     #[command(flatten)]
     Catalog(CatalogCommand),
     /// Fetch the member roster for a known group ID from WeChat.
@@ -2046,6 +2066,13 @@ async fn run(cli: Cli) -> Result<()> {
                 &[("cursor", cursor), ("limit", limit.map(|v| v.to_string()))],
             ))
             .await?
+        }
+        Command::Contacts {
+            command: Some(ContactCommand::List { limit, cursor, all }),
+            ..
+        } => {
+            client_actions::catalog_list(&r, "contacts", limit, cursor, all.then_some("all"))
+                .await?
         }
         Command::Contacts {
             command: Some(ContactCommand::Catalog(command)),

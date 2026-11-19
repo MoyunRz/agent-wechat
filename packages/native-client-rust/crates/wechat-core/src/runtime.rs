@@ -124,6 +124,9 @@ struct AccountCalls {
     closing: bool,
 }
 
+/// Per-(account, operation-kind) admission gates; see `lock_operation`.
+type OperationGates = BTreeMap<(String, String), Arc<AsyncMutex<()>>>;
+
 #[doc(hidden)]
 pub struct CoreShared {
     account_calls: Mutex<AccountCalls>,
@@ -172,8 +175,7 @@ pub struct CoreShared {
     pub(crate) verified_content: Mutex<crate::media::VerifiedContent>,
     /// Per-(account, operation-kind) admission gates so one mutating kind runs
     /// at a time per account; see `lock_operation`.
-    pub(crate) operation_gates:
-        Mutex<std::collections::BTreeMap<(String, String), Arc<AsyncMutex<()>>>>,
+    pub(crate) operation_gates: Mutex<OperationGates>,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,

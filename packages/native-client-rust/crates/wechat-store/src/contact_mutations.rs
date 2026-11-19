@@ -48,11 +48,7 @@ fn write(tx: &rusqlite::Transaction<'_>, op: &Operation) -> Result<()> {
             op.updated_at
         ],
     )?;
-    let seq = tx.last_insert_rowid();
-    tx.execute(
-        "DELETE FROM events WHERE sequence<=?1",
-        [seq.saturating_sub(10_000)],
-    )?;
+    crate::trim_events(tx)?;
     Ok(())
 }
 fn key_hash(key: &str) -> Result<String> {
@@ -62,12 +58,46 @@ fn key_hash(key: &str) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(key.as_bytes())))
 }
 impl Store {
-    /// Successful submissions awaiting their canonical contact sync, never resubmitted.
+    /// Accepted or partly accepted submissions awaiting canonical contact sync, never resubmitted.
     pub fn pending_contact_relationships(
         &self,
         account: &str,
     ) -> Result<Vec<StoredContactMutation>> {
-        self.control(account,|db| {let ids={let mut q=db.prepare("SELECT operation_id FROM contact_mutations WHERE phase='succeeded' AND json_extract((SELECT result_json FROM operations WHERE id=operation_id),'$.profileProjection')='awaiting_contact_sync' LIMIT 2000")?;let rows=q.query_map([],|r|r.get::<_,String>(0))?;rows.collect::<rusqlite::Result<Vec<_>>>()?};ids.iter().map(|id|read(db,account,id)).collect()})
+        self.control(account,|db| {let ids={let mut q=db.prepare("SELECT operation_id FROM contact_mutations WHERE (phase='succeeded' OR (phase='failed' AND json_extract((SELECT result_json FROM operations WHERE id=operation_id),'$.partial')=1)) AND json_extract((SELECT result_json FROM operations WHERE id=operation_id),'$.profileProjection')='awaiting_contact_sync' LIMIT 2000")?;let rows=q.query_map([],|r|r.get::<_,String>(0))?;rows.collect::<rusqlite::Result<Vec<_>>>()?};ids.iter().map(|id|read(db,account,id)).collect()})
+    }
+
+    /// Unsettled intents, including unknown outcomes, used to guard a new mutation.
+    /// Callers inspect the sealed action and exclude their own operation before submission.
+    pub fn active_contact_mutations(
+        &self,
+        account: &str,
+        own_operation: Option<&str>,
+    ) -> Result<Vec<StoredContactMutation>> {
+        self.control(account, |db| {
+            let ids = {
+                let mut query = db.prepare("SELECT operation_id FROM contact_mutations WHERE phase IN ('queued','submitting','received','projecting','needs_review') AND length(encrypted_request)>0 AND (?1 IS NULL OR operation_id!=?1) LIMIT 2000")?;
+                let rows = query.query_map([own_operation], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            ids.iter().map(|id| read(db, account, id)).collect()
+        })
+    }
+
+    /// Detect whether bounded privacy guards could omit an unsettled contact intent.
+    /// Includes all candidate actions because optional privacy is in the sealed request.
+    /// This admission check does not restrict settlement's existing batch enumeration.
+    pub fn contact_privacy_guard_overflow(
+        &self,
+        account: &str,
+        own_operation: Option<&str>,
+    ) -> Result<bool> {
+        self.control(account, |db| {
+            Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM contact_mutations c JOIN operations o ON o.id=c.operation_id WHERE (?1 IS NULL OR c.operation_id!=?1) AND ((c.phase IN ('queued','submitting','received','projecting','needs_review') AND length(c.encrypted_request)>0) OR ((c.phase='succeeded' OR (c.phase='failed' AND json_extract(o.result_json,'$.partial')=1)) AND json_extract(o.result_json,'$.profileProjection')='awaiting_contact_sync')) LIMIT 1 OFFSET 2000)",
+                [own_operation],
+                |row| row.get(0),
+            )?)
+        })
     }
 
     /// Save a prepared canonical stage before applying it; no network submission.
@@ -91,11 +121,12 @@ impl Store {
             let row: Option<(String, String)> = db
                 .query_row(
                     "SELECT operation_id,request_hash FROM contact_mutations WHERE key_hash=?1",
-                    [key],
+                    [&key],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()?;
             let Some((id, saved)) = row else {
+                crate::retention::ensure_key_live(db, crate::retention::CONTACT_KEY, &key)?;
                 return Ok(None);
             };
             if hash.is_some_and(|hash| hash != saved) {
@@ -137,6 +168,7 @@ impl Store {
                 }
                 return Ok((read(&tx, &op.account_id, &id)?.operation, false));
             }
+            crate::retention::ensure_key_live(&tx, crate::retention::CONTACT_KEY, &key)?;
             tx.execute(
                 "INSERT INTO operations VALUES(?1,?2,?3,?4,?5,?6)",
                 params![
@@ -294,7 +326,7 @@ impl Store {
         self.control(account, |db| {
             let ids = {
                 let mut q = db
-                .prepare("SELECT operation_id FROM contact_mutations WHERE phase='needs_review' OR (phase IN ('projecting','cancelled','failed','succeeded') AND json_extract((SELECT result_json FROM operations WHERE id=operation_id),'$.profileProjection')='pending')")?;
+                .prepare("SELECT operation_id FROM contact_mutations WHERE (phase='needs_review' AND length(encrypted_request)>0) OR (phase IN ('projecting','cancelled','failed','succeeded') AND json_extract((SELECT result_json FROM operations WHERE id=operation_id),'$.profileProjection')='pending')")?;
                 let rows = q.query_map([], |r| r.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
             };
@@ -354,5 +386,173 @@ mod tests {
                 assert_eq!(held.operation.result["remoteOutcome"], "unknown");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod privacy_pending_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn queued_and_unknown_intents_are_guarded_separately_from_settlement() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = Store::open(&temporary.path().join("data")).unwrap();
+        store.create_account("one").unwrap();
+        for id in ["queued", "unknown", "failed"] {
+            let mut operation = Operation {
+                id: id.into(),
+                account_id: "one".into(),
+                kind: "contact_mutation".into(),
+                state: "queued".into(),
+                result: serde_json::json!({"action":"update_privacy","remoteOutcome":"unknown"}),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            };
+            store
+                .create_contact_mutation(&operation, id, &"a".repeat(64), &[1], &[2])
+                .unwrap();
+            if id != "queued" {
+                let phase = if id == "unknown" {
+                    "needs_review"
+                } else {
+                    "failed"
+                };
+                operation.state = phase.into();
+                store
+                    .advance_contact_mutation(&operation, phase, 0)
+                    .unwrap();
+            }
+        }
+        let active = store
+            .active_contact_mutations("one", None)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.operation.id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(active, BTreeSet::from(["queued".into(), "unknown".into()]));
+        assert!(store
+            .pending_contact_relationships("one")
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .active_contact_mutations("one", None)
+            .unwrap()
+            .iter()
+            .any(|row| row.operation.id == "unknown" && row.phase == "needs_review"));
+    }
+
+    #[test]
+    fn privacy_capacity_uses_combined_candidates_excludes_self_and_leaves_settlement_batched() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = Store::open(&temporary.path().join("data")).unwrap();
+        store.create_account("one").unwrap();
+        let seed = |start: usize, end: usize, phase: &str| {
+            store.control("one", |db| {
+                let tx = db.transaction()?;
+                for index in start..end {
+                    let id = format!("capacity-{index:04}");
+                    let result = serde_json::json!({"action":"update_privacy","profileProjection":"awaiting_contact_sync"}).to_string();
+                    tx.execute("INSERT INTO operations VALUES(?1,'contact_mutation',?2,?3,'now','now')", params![id, phase, result])?;
+                    tx.execute("INSERT INTO contact_mutations VALUES(?1,?2,?3,?4,0,?5,?6)", params![id, format!("key-{index}"), "a".repeat(64), phase, &[1u8][..], &[2u8][..]])?;
+                }
+                tx.commit()?;
+                Ok(())
+            }).unwrap();
+        };
+        seed(0, 1000, "queued");
+        seed(1000, 2000, "succeeded");
+        assert!(!store.contact_privacy_guard_overflow("one", None).unwrap());
+        seed(2000, 2001, "queued");
+        assert!(store.contact_privacy_guard_overflow("one", None).unwrap());
+        assert!(!store
+            .contact_privacy_guard_overflow("one", Some("capacity-2000"))
+            .unwrap());
+        assert!(!store
+            .active_contact_mutations("one", Some("capacity-2000"))
+            .unwrap()
+            .iter()
+            .any(|record| record.operation.id == "capacity-2000"));
+        seed(2001, 3002, "succeeded");
+        assert!(store
+            .contact_privacy_guard_overflow("one", Some("capacity-2000"))
+            .unwrap());
+        let first = store.pending_contact_relationships("one").unwrap();
+        assert_eq!(first.len(), 2000);
+        store.control("one", |db| {
+            let tx = db.transaction()?;
+            for record in first {
+                tx.execute("UPDATE operations SET result_json=json_set(result_json,'$.profileProjection','complete') WHERE id=?1", [record.operation.id])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).unwrap();
+        assert_eq!(store.pending_contact_relationships("one").unwrap().len(), 1);
+        assert!(!store.contact_privacy_guard_overflow("one", None).unwrap());
+    }
+
+    #[test]
+    fn partial_failures_are_listed_until_their_canonical_snapshot_is_observed() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = Store::open(&temporary.path().join("data")).unwrap();
+        store.create_account("one").unwrap();
+        for (id, partial, succeeded) in [
+            ("accepted", false, true),
+            ("partial", true, false),
+            ("rejected", false, false),
+        ] {
+            let mut operation = Operation {
+                id: id.into(),
+                account_id: "one".into(),
+                kind: "contact_mutation".into(),
+                state: "queued".into(),
+                result: serde_json::json!({"action":"update_privacy","partial":partial,"profileProjection":"awaiting_contact_sync"}),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            };
+            store
+                .create_contact_mutation(&operation, id, &"a".repeat(64), &[1], &[2])
+                .unwrap();
+            if succeeded {
+                operation.state = "needs_review".into();
+                store
+                    .advance_contact_mutation(&operation, "needs_review", 0)
+                    .unwrap();
+                operation.state = "running".into();
+                store
+                    .advance_contact_mutation(&operation, "projecting", 0)
+                    .unwrap();
+            }
+            operation.state = if succeeded { "succeeded" } else { "failed" }.into();
+            store
+                .advance_contact_mutation(&operation, &operation.state, 0)
+                .unwrap();
+        }
+        assert!(store
+            .active_contact_mutations("one", None)
+            .unwrap()
+            .is_empty());
+        let ids = |store: &Store| {
+            store
+                .pending_contact_relationships("one")
+                .unwrap()
+                .into_iter()
+                .map(|row| row.operation.id)
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            ids(&store),
+            BTreeSet::from(["accepted".into(), "partial".into()])
+        );
+        let mut partial = store.contact_mutation("one", "partial").unwrap().operation;
+        partial.result["profileProjection"] = serde_json::json!("complete");
+        store
+            .advance_contact_mutation(&partial, "failed", 0)
+            .unwrap();
+        assert_eq!(ids(&store), BTreeSet::from(["accepted".into()]));
+        let partial = store.contact_mutation("one", "partial").unwrap();
+        assert_eq!(partial.phase, "failed");
+        assert_eq!(partial.operation.state, "failed");
+        assert_eq!(partial.operation.result["partial"], true);
     }
 }

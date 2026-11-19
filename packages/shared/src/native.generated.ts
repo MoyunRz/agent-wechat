@@ -1084,20 +1084,24 @@ localType?: bigint,
  * Relationship to this account. It currently always reports `unknown`, including for saved
  * friends.
  */
-privacy?: NativeContactPrivacySettings,
+relation: string, classification?: PeerClassification, 
+/**
+ * Current relationship settings, when available for this friend.
+ */
+privacy?: NativeContactPrivacySettings, 
 /**
  * Version to send as `expectedVersion` when changing this contact's privacy
  * or remark. It changes whenever either of them changes.
  */
-privacyVersion?: string,
+privacyVersion?: string, 
 /**
  * True while an accepted relationship edit is awaiting contact sync.
  */
-privacyPending?: boolean,
+privacyPending?: boolean, 
 /**
  * True while an accepted remark change is waiting for WeChat's saved value.
  */
-remarkPending?: boolean,
+remarkPending?: boolean, 
 /**
  * Why a friend has no `privacy` or `privacyVersion`, so it can't be edited yet:
  * `contact_privacy_unresolved` (refresh the contact),
@@ -1105,7 +1109,7 @@ remarkPending?: boolean,
  * `profile_identity_unavailable` or `contact_flags_unresolved`.
  */
 privacyUnavailable?: string, };
-export type NativeGroup = {
+export type NativeGroup = { 
 /**
  * Group ID, ending with `@chatroom`. It is the same as `roomId`.
  */
@@ -1218,219 +1222,223 @@ members: Array<string>,
  * Name for the new group, up to 512 bytes. Optional.
  */
 name?: string, };
-export type NativeContactSearchRequest = {
+export type NativeContactSearchRequest = { 
 /**
  * Exact WeChat ID query. Phone lookup has not been verified.
  */
 query: string, };
-export type NativeContactSearch = {
+export type NativeContactSearch = { 
 /**
  * Display query for the discovered identity.
  */
-displayName: string,
+displayName: string, 
 /**
  * Opaque recipient material; pass unchanged to send.
  */
-recipientRef: string,
+recipientRef: string, 
 /**
  * Unix seconds after which a new discovery is required.
  */
-expiresAt: number,
+expiresAt: number, 
 /**
  * Always `wechat` for this endpoint.
  */
-source: string,
+source: string, 
 /**
  * Existing request conversation for the resolved identity, when retained locally.
  */
-request: NativeContactRequest | null,
+request: NativeContactRequest | null, 
 /**
  * Canonical saved contact ID when membership is established for this identity.
  */
 contactId: string | null, };
-export type NativeContactPrivacySettings = {
+export type NativeContactPrivacySettings = { 
 /**
  * Restrict this relationship to chats.
  */
-chatsOnly: boolean,
+chatsOnly: boolean, 
 /**
  * Hide this account's Moments posts from this person.
  */
-hideMyPosts: boolean,
+hideMyPosts: boolean, 
 /**
  * Hide this person's Moments posts from this account.
  */
 hideTheirPosts: boolean, };
-export type NativeContactPrivacy = {
+export type NativeContactPrivacy = { 
 /**
  * Current settings for this account's relationship.
  */
-privacy: NativeContactPrivacySettings,
+privacy: NativeContactPrivacySettings, 
 /**
  * Account/contact-bound version required when saving a change.
  */
 version: string, };
-export type NativeContactPrivacySnapshotQuery = {
+export type NativeContactPrivacySnapshotQuery = { 
 /**
  * One to 200 exact contact IDs, at most 512 bytes per ID.
  */
 ids: Array<string>, };
-export type NativeContactPrivacySnapshots = {
+export type NativeContactPrivacySnapshots = { 
 /**
  * Snapshots keyed by contact ID. Missing, unsupported, pending and unresolved contacts are omitted.
  */
 snapshots: { [key in string]?: NativeContactPrivacy }, };
-export type NativeContactUpdate = {
+export type NativeContactUpdate = { 
 /**
  * Desired relationship settings; unrelated contact flags are preserved.
  * Send either `privacy` or `remark` in one request.
  */
-privacy?: NativeContactPrivacySettings,
+privacy?: NativeContactPrivacySettings, 
 /**
  * New personal remark: a string sets it, `null` clears it, and omitting
  * it keeps the current remark. Outer whitespace is removed.
  */
-remark?: string | null,
+remark?: string | null, 
 /**
- * Version returned by the privacy read on this account.
+ * Version from the contact's `privacyVersion` on this account.
  */
 expectedVersion: string, };
-export type NativeContactRequestAccept = {
+export type NativeContactRequestAccept = { 
 /**
  * Current request version returned by get/list.
  */
-expectedVersion: string,
+expectedVersion: string, 
 /**
  * Initial relationship privacy; omission keeps the supported default.
  */
 privacy?: NativeContactPrivacySettings, };
-export type NativeContactRequestSend = {
+export type NativeContactRequestSend = { 
 /**
  * Exact reference returned by discovery on this account.
  */
-recipientRef: string,
+recipientRef: string, 
 /**
  * Greeting supplied by the owner; no automatic default is inserted.
  */
-message: string, };
-export type NativeContactRequestVersion = {
+message: string, 
+/**
+ * Initial relationship privacy; omission keeps the supported default.
+ */
+privacy?: NativeContactPrivacySettings, };
+export type NativeContactRequestVersion = { 
 /**
  * Current request version returned by get/list.
  */
 expectedVersion: string, };
-export type NativeContactRequestMessage = {
+export type NativeContactRequestMessage = { 
 /**
  * Original server ID as a decimal string; sent entries may use zero.
  */
-serverId: string,
+serverId: string, 
 /**
  * Verification text, treated as untrusted display data.
  */
-message: string,
+message: string, 
 /**
  * Original event time in Unix seconds.
  */
-createdAt: number,
+createdAt: number, 
 /**
  * Incoming or outgoing.
  */
 direction: string, };
-export type NativeContactRequest = {
+export type NativeContactRequest = { 
 /**
  * Opaque request identity.
  */
-id: string,
+id: string, 
 /**
  * Saved peer identity; does not itself establish friendship.
  */
-peerId: string,
+peerId: string, 
 /**
  * Saved contact label or retained peer identity.
  */
-displayName: string,
+displayName: string, 
 /**
  * Incoming or outgoing current row direction.
  */
-direction: string,
+direction: string, 
 /**
  * Current verification text.
  */
-message: string,
+message: string, 
 /**
  * Current row time in Unix seconds.
  */
-updatedAt: number,
+updatedAt: number, 
 /**
  * Exact version for accept/delete preconditions.
  */
-version: string,
+version: string, 
 /**
  * Whether current canonical membership establishes a contact.
  */
-isContact: boolean,
+isContact: boolean, 
 /**
  * Whether the current incoming request can be accepted locally.
  */
-actionable: boolean,
+actionable: boolean, 
 /**
  * Incoming request needing attention in navigation badges.
  */
-attention: boolean,
+attention: boolean, 
 /**
  * `contact`, `request_received` or `request_sent`; history is not server pending proof.
  */
-state: string,
+state: string, 
 /**
  * Retained per-message verification history.
  */
 history: Array<NativeContactRequestMessage>, };
-export type NativeContactRequestPage = {
+export type NativeContactRequestPage = { 
 /**
  * Canonical request rows in update-time order.
  */
-items: Array<NativePageItem<NativeContactRequest>>,
+items: Array<NativePageItem<NativeContactRequest>>, 
 /**
  * Opaque continuation, or null after the final page.
  */
-nextCursor: string | null,
+nextCursor: string | null, 
 /**
  * Version of this filtered result collection.
  */
-sourceGeneration: string,
+sourceGeneration: string, 
 /**
  * Local profile coverage description.
  */
-coverage: unknown,
+coverage: unknown, 
 /**
  * Incoming actionable rows needing attention across all filters.
  */
-pendingIncomingCount: number,
+pendingIncomingCount: number, 
 /**
  * Event boundary of the retained list, for continuing the existing account event stream.
  */
 asOfEventCursor: string, };
-export type NativeContactRequestQuery = {
+export type NativeContactRequestQuery = { 
 /**
  * Incoming or outgoing direction.
  */
-direction: string | null,
+direction: string | null, 
 /**
  * Include only current acceptance candidates when true.
  */
-actionable: boolean | null,
+actionable: boolean | null, 
 /**
  * Match saved labels, peer identities or verification text.
  */
-search: string | null,
+search: string | null, 
 /**
  * Page size, from 1 to 200; default 50.
  */
-limit: number | null,
+limit: number | null, 
 /**
  * Exact continuation from the same query.
  */
 cursor: string | null, };
-export type NativeGroupNameRequest = {
+export type NativeGroupNameRequest = { 
 /**
  * The new group name. It must not be blank and can be up to 512 bytes.
  */
@@ -1639,6 +1647,27 @@ version: NativeIdentity,
  * Daemon state. It is `ready` while the daemon is serving requests.
  */
 state: string, };
+export type ProactiveCacheKinds = { 
+/**
+ * Download and cache received images. The default is true.
+ */
+image: boolean, 
+/**
+ * Download and cache received stickers and emoji. The default is true.
+ */
+sticker: boolean, 
+/**
+ * Download and cache received files. The default is true.
+ */
+file: boolean, 
+/**
+ * Download and cache received videos. The default is true.
+ */
+video: boolean, 
+/**
+ * Download and cache received voice notes. The default is true.
+ */
+voice: boolean, };
 export type AccountSettings = { 
 /**
  * Largest advertised size in bytes that the daemon downloads automatically for this account,
@@ -1875,6 +1904,7 @@ computerName: string, };
 export type MediaKind = "image" | "file" | "video" | "voice" | "sticker";
 export type MediaVariant = "best" | "thumbnail" | "standard" | "original" | "normal" | "encoded";
 export type VideoSendQuality = "normal" | "original";
+export type ImageSendQuality = "standard" | "original";
 export type MediaTransferRequest = { 
 /**
  * ID of the message to download from. It must match the message ID in the URL.

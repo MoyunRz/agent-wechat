@@ -1817,6 +1817,30 @@
         ],
         "type": "object"
       },
+      "NativeContactPrivacySettings": {
+        "additionalProperties": false,
+        "description": "Relationship privacy selected by the account owner.",
+        "properties": {
+          "chatsOnly": {
+            "description": "Restrict this relationship to chats.",
+            "type": "boolean"
+          },
+          "hideMyPosts": {
+            "description": "Hide this account's Moments posts from this person.",
+            "type": "boolean"
+          },
+          "hideTheirPosts": {
+            "description": "Hide this person's Moments posts from this account.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chatsOnly",
+          "hideMyPosts",
+          "hideTheirPosts"
+        ],
+        "type": "object"
+      },
       "NativeContactRequest": {
         "description": "One per-peer canonical request conversation with a current action/version.",
         "properties": {
@@ -2014,6 +2038,17 @@
           "message": {
             "description": "Greeting supplied by the owner; no automatic default is inserted.",
             "type": "string"
+          },
+          "privacy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeContactPrivacySettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial relationship privacy; omission keeps the supported default."
           },
           "recipientRef": {
             "description": "Exact reference returned by discovery on this account.",
@@ -6084,7 +6119,7 @@
     },
     "/v1/accounts/{a}/contacts/verify-user/accept": {
       "post": {
-        "operationId": "acceptContactRequest",
+        "operationId": "acceptVerifyUserRequest",
         "parameters": [
           {
             "description": "Account ID or alias.",

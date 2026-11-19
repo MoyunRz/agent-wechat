@@ -731,8 +731,8 @@ export async function refreshFriendRequestCount(): Promise<void> {
   if (!current?.authenticated)
     return
   try {
-    const response = await wechatApi.listFriendRequests(current.id)
-    setSession({ friendRequestCount: (response.items ?? []).length })
+    const page = await wechatApi.listContactRequests(current.id, { direction: 'incoming', actionable: true, limit: 1 })
+    setSession({ friendRequestCount: page.pendingIncomingCount ?? page.items.length })
   }
   catch {
     // Older hubs have no such endpoint; the badge stays at zero.

@@ -13,12 +13,8 @@ pub(super) fn routes() -> Router<App> {
             post(accept),
         )
         .api_route(
-            "/v1/accounts/{a}/contact-privacy/snapshots",
-            post(privacy_snapshots),
-        )
-        .api_route(
             "/v1/accounts/{a}/contacts/{id}",
-            axum::routing::delete(remove),
+            axum::routing::delete(remove).patch(update_contact),
         )
         .api_route(
             "/v1/accounts/{a}/contact-mutations/by-idempotency-key",
@@ -100,6 +96,7 @@ async fn send(
         ContactMutation::SendRequest {
             recipient_ref: input.recipient_ref,
             message: input.message,
+            privacy: input.privacy.map(privacy_settings),
         },
     )
     .await
@@ -109,7 +106,7 @@ async fn accept(
     Extension(c): Extension<Claims>,
     Path((a, id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(input): Json<contracts::NativeContactRequestVersion>,
+    Json(input): Json<contracts::NativeContactRequestAccept>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     submit(
         app,
@@ -119,6 +116,7 @@ async fn accept(
         ContactMutation::AcceptRequest {
             id,
             expected_version: input.expected_version,
+            privacy: input.privacy.map(privacy_settings),
         },
     )
     .await
@@ -150,33 +148,6 @@ fn privacy_settings(
         hide_my_posts: input.hide_my_posts,
         hide_their_posts: input.hide_their_posts,
     }
-}
-async fn privacy(
-    State(app): State<App>,
-    Extension(c): Extension<Claims>,
-    Path((a, id)): Path<(String, String)>,
-) -> ApiResult<Json<Value>> {
-    c.require(Some(&a), "admin")?;
-    let value = app
-        .core
-        .read(&a.clone(), move |core| core.contact_privacy(&a, &id))
-        .await?;
-    checked::<contracts::NativeContactPrivacy>(value)
-}
-async fn privacy_snapshots(
-    State(app): State<App>,
-    Extension(c): Extension<Claims>,
-    Path(a): Path<String>,
-    Json(input): Json<contracts::NativeContactPrivacySnapshotQuery>,
-) -> ApiResult<Json<Value>> {
-    c.require(Some(&a), "admin")?;
-    let value = app
-        .core
-        .read(&a.clone(), move |core| {
-            core.contact_privacy_snapshots(&a, &input.ids)
-        })
-        .await?;
-    checked::<contracts::NativeContactPrivacySnapshots>(value)
 }
 async fn update_contact(
     State(app): State<App>,
@@ -284,6 +255,11 @@ mod tests {
                 json!({"expectedVersion":"current"}),
             ),
             ("DELETE", "contacts/peer", json!({})),
+            (
+                "PATCH",
+                "contacts/peer",
+                json!({"privacy":{"chatsOnly":true,"hideMyPosts":false,"hideTheirPosts":false},"expectedVersion":"current"}),
+            ),
         ] {
             for (bearer, key, status) in [
                 (&read, Some("key"), StatusCode::FORBIDDEN),
@@ -307,10 +283,11 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn privacy_read_requires_admin_on_the_selected_account() {
+    async fn privacy_reads_accept_read_scope_only_on_the_selected_account() {
         let temp = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::open(&temp.path().join("data")).unwrap());
         store.create_account("one").unwrap();
+        store.create_account("two").unwrap();
         let read = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         store
             .issue_token(
@@ -325,25 +302,20 @@ mod tests {
             Core::new(store, None).unwrap(),
             "0123456789abcdef0123456789abcdef",
         );
-        for (method, path, body) in [
-            ("GET", "contacts/peer/privacy", Body::empty()),
-            (
-                "POST",
-                "contact-privacy/snapshots",
-                Body::from(r#"{"ids":["peer"]}"#),
-            ),
-        ] {
-            let request = Request::builder()
-                .method(method)
-                .uri(format!("/v1/accounts/one/{path}"))
-                .header("authorization", format!("Bearer {read}"))
-                .header("content-type", "application/json")
-                .body(body)
-                .unwrap();
-            assert_eq!(
-                app.clone().oneshot(request).await.unwrap().status(),
-                StatusCode::FORBIDDEN
-            );
+        for path in ["contacts", "contacts/peer"] {
+            for (account, expected) in [("one", "profile_keys_missing"), ("two", "forbidden")] {
+                let request = Request::builder()
+                    .uri(format!("/v1/accounts/{account}/{path}"))
+                    .header("authorization", format!("Bearer {read}"))
+                    .body(Body::empty())
+                    .unwrap();
+                let response = app.clone().oneshot(request).await.unwrap();
+                let body = axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap();
+                let value: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(value["error"]["code"], expected, "{account}/{path}");
+            }
         }
     }
 }
