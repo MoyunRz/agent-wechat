@@ -234,3 +234,30 @@ VerifyUserRequest 确认）字段：
 
 只打长度、编码与密文 hex 头，不含 cookie、密钥与 ticket 明文。每一轮探针把 trace 与
 operation 审计事件对齐即可定位拒绝发生在哪一层（encode → pack → mmtls → envelope → handler）。
+
+## 12. Windows 官方客户端动态捕获（2026-11-17 深夜，accept 形状破案）
+
+> 环境：Windows 11，官方客户端 4.2.0.13（`Weixin.dll` 205,943,848 B / SHA-256 `afe3d02c…`，
+> 与旧分析构建 `d733489e…` 不同，偏移重新定位）。Frida 17.26.4 attach 主 Weixin.exe。
+> 账号角色：官方客户端登录 **昵称C**（同意方），**昵称A**（`wxid-self-a`）为申请人。
+> hook 只读不改，dump 落 `%TEMP%\wx-reverse\weixin-capture\dumps\`（含 ticket 明文，不入仓库）。
+
+**基础设施**：capstone + numpy rip-relative 全相位扫描 + 全名函数字面量反查 vtable 完成 4.2.0.13
+偏移重定位（CGI 137 复确认；四个类 vtable/serialize/parse 全部提取，hasbits 偏移与旧构建一致）。
+Frida hook 点：Request::serialize（主捕获）、New×2、MergeFrom（slot6，含源对象）、响应 parse、
+glue `0x1a7a550` / biz `0x1a661e0` 入口。仅主进程加载 Weixin.dll。
+
+**三轮迭代**：v1 只 hook serialize/New → 零触发（第一轮 accept 发生在钩子挂载前 + u64 count 误读）；
+v2 修 u32 count + glue/biz 钩子 → 抓到 opcode=3/scene=1/hasbits=0x437/ret=0，但 f4 count 仍按 u64 读
+（0x1_00000001）导致元素漏抓；v3 解引用元素指针数组 + 字符串完整抓取 → **全字段到手**。
+
+**最终形状（ret=0 成功样本，与 Linux Frida dump 完全一致）**：见 spec §3。要点：
+- `opcode=3 + scene=1 + f4=[VerifyUser{f1=申请人wxid明文, f2=v4 ticket 原样(含@stranger)}]`，
+  元素 hasbits=0x03；f14 SKB 在 accept 中不用
+- Request 级 f5=""（置位但空）、f6=1、**f7=[申请scene(15)]**、f11=动态加密 blob
+  （{3:{1:len, 2:{1:"00000001\0", 2:15, 3:加密载荷}}}，7840/7872B 两轮不同）
+- response ret=0、f2=申请人 wxid 回显
+- 失败归因补全：旧灰度探针从未发送 f11 blob（且 f1/ticket 语义均错）
+
+**遗留**：f11 blob 必要性与生成算法未证（hub 探针矩阵第一项）；f5/f6/f7 必要性待探针；
+f1=申请人 wxid 的语义边界（encryptusername 场景）待更多来源样本。

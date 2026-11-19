@@ -1,5 +1,9 @@
 # verifyuser 协议规格（Windows 4.x Weixin.dll 静态分析结论）
 
+> **本文已归档（2026-11-17）**：这是 Windows PE 阶段的原始交付快照，止于 2026-11-16，
+> 其 §2「opcode accept=3 [推]」、§6 请求模板等结论已被后续 Linux ELF 交叉验证与
+> Frida 动态取证修正。**正式结论以 [protocol-mapping/verifyuser-protocol-spec.md](../../protocol-mapping/verifyuser-protocol-spec.md) 为准。**
+
 > 依据：Ghidra 12.1.4 对 `Weixin.dll`（SHA-256 `d733489e…`，204,168,240 字节）的完整自动分析。
 > 提取会话产物：`<本地临时目录>\wx-reverse\rea-session\`（fieldnum-* 共 45 个 JSON，text\ 下有提取后的伪代码）。
 > 证据分级：**[硬]** = 反汇编直接读出；**[推]** = 结构+3.x 对照推断，需灰度验证。
