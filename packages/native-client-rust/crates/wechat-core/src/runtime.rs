@@ -176,6 +176,8 @@ pub struct CoreShared {
     /// Per-(account, operation-kind) admission gates so one mutating kind runs
     /// at a time per account; see `lock_operation`.
     pub(crate) operation_gates: Mutex<OperationGates>,
+    /// Wake signals for the account loops; see `account_waker`.
+    pub(crate) account_wakers: Mutex<BTreeMap<String, Arc<tokio::sync::Notify>>>,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,
@@ -474,6 +476,7 @@ impl Core {
                 media_cache: crate::media_cache::MediaDiskCache::new(media_cache_root),
                 verified_content: Mutex::new(Default::default()),
                 operation_gates: Mutex::new(BTreeMap::new()),
+                account_wakers: Mutex::new(BTreeMap::new()),
             }),
         });
         for account in core.store.accounts()? {
@@ -2799,10 +2802,14 @@ impl Core {
             self.start_push_worker(&account.id)?;
             self.start_received_media_worker(&account.id);
             let core = self.clone();
+            let waker = core.account_waker(&account.id);
             tokio::spawn(async move {
                 let mut delay = 1;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                        _ = waker.notified() => {}
+                    }
                     if core.stopping.load(Ordering::SeqCst)
                         || core.store.account(&account.id).is_err()
                     {
@@ -2856,6 +2863,18 @@ impl Core {
             });
         }
         Ok(())
+    }
+    /// The account loop's wake signal. A wake while a tick runs is kept, so the
+    /// next tick follows right after it.
+    pub(crate) fn account_waker(&self, account: &str) -> Arc<tokio::sync::Notify> {
+        self.account_wakers
+            .lock()
+            .map(|mut wakers| wakers.entry(account.to_owned()).or_default().clone())
+            .unwrap_or_default()
+    }
+    /// Run the account's next tick now instead of at its scheduled interval.
+    pub(crate) fn wake_account(&self, account: &str) {
+        self.account_waker(account).notify_one();
     }
     async fn tick(self: &Arc<Self>, account: &str) -> Result<u64> {
         self.session_request(account, "polling", |fence| {
