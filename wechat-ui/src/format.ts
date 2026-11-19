@@ -1,4 +1,4 @@
-import { getLocale } from './i18n'
+import { getLocale, t } from './i18n'
 import type { Contact, Message, Thread } from './types'
 
 /** Locale for date and time formatting, following the interface language. */
@@ -24,6 +24,16 @@ export function contactName(contact: Contact | null | undefined): string {
     || contact.id
 }
 
+/** Members shown when a group has no name of its own. */
+const UNNAMED_GROUP_MEMBERS = 3
+
+/**
+ * Name to show for a conversation.
+ *
+ * A group that has no display name yet (a fresh room, a group whose profile has
+ * not synced) would otherwise surface its raw `…@chatroom` id. Describe it by
+ * its cached members instead, the way the desktop client did.
+ */
 export function threadName(thread: Thread | null | undefined): string {
   if (!thread)
     return ''
@@ -33,7 +43,18 @@ export function threadName(thread: Thread | null | undefined): string {
   const peer = (thread.peerId || thread.id).trim()
   if (peer.endsWith('@openim') && (!name || name === peer))
     return '企业微信客服'
-  return name || thread.id || '未命名会话'
+  if (name)
+    return name
+  if (thread.kind === 'group') {
+    const members = (thread.avatarMembers ?? [])
+      .map(member => member.displayName?.trim())
+      .filter((label): label is string => Boolean(label))
+      .slice(0, UNNAMED_GROUP_MEMBERS)
+      .join(', ')
+    if (members)
+      return t('群聊会话') + ' · ' + members
+  }
+  return thread.id || '未命名会话'
 }
 
 /**
@@ -61,7 +82,8 @@ export function threadKindLabel(kind: string, peerId?: string | null): string {
     return '企业微信客服'
   switch (kind) {
     case 'group':
-      return '群聊'
+      // Distinct from the list's "群聊" filter tab, which reads "Groups".
+      return '群聊会话'
     case 'system':
       return '系统会话'
     default:

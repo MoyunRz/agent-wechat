@@ -36,5 +36,6 @@
   "[引用]": "[Quote]",
   "[应用消息]": "[App message]",
   "[系统消息]": "[System message]",
-  "[消息]": "[Message]"
+  "[消息]": "[Message]",
+  "群聊会话": "Group chat"
 }

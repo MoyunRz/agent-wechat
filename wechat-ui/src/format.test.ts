@@ -62,6 +62,22 @@ describe('threadName', () => {
     expect(threadName(thread({ displayName: null, id: 'x@openim', peerId: 'x@openim' }))).toBe('企业微信客服')
     expect(threadName(thread({ displayName: 'x@openim', id: 'x@openim', peerId: 'x@openim' }))).toBe('企业微信客服')
   })
+
+  it('describes an unnamed group by its cached members instead of its raw id', () => {
+    const unnamed = thread({
+      kind: 'group',
+      displayName: null,
+      id: '123@chatroom',
+      peerId: '123@chatroom',
+      avatarMembers: [
+        { id: 'a', displayName: 'Daniel Park' },
+        { id: 'b', displayName: 'Mei Chen' },
+      ],
+    })
+    expect(threadName(unnamed)).toBe('群聊会话 · Daniel Park, Mei Chen')
+    // Without cached members the id is still the only thing to show.
+    expect(threadName(thread({ kind: 'group', displayName: null, id: '456@chatroom', peerId: '456@chatroom' }))).toBe('456@chatroom')
+  })
 })
 
 describe('threadNoNotify', () => {
@@ -77,7 +93,7 @@ describe('threadKindLabel', () => {
   it('corrects official and openim peers before the daemon kind', () => {
     expect(threadKindLabel('direct', 'gh_abc')).toBe('服务号')
     expect(threadKindLabel('direct', 'x@openim')).toBe('企业微信客服')
-    expect(threadKindLabel('group', 'room@chatroom')).toBe('群聊')
+    expect(threadKindLabel('group', 'room@chatroom')).toBe('群聊会话')
     expect(threadKindLabel('system')).toBe('系统会话')
     expect(threadKindLabel('direct')).toBe('单聊')
   })

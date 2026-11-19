@@ -2,28 +2,13 @@
 # Run `npm --prefix wechat-ui run scenes:list` after changing them. A screenshot is named `<scene>@<viewport>`; viewports are
 # `desktop` (1280x800), `narrow` (390x844), `compact` (320x700), joined by `+` for multiple sizes.
 # Format: ITEM | ATTRIBUTES | DESCRIPTION
-scene account-list | route /{server}/accounts, viewports desktop+narrow | The accounts on a hub: one signed in and one that still needs a QR code.
-scene add-contact | route /{server}/{account}/contacts, viewports desktop+narrow+compact | The shared contact card with a greeting and privacy choices before sending a friend request.
-scene channels-video-cards | route /{server}/{account}/chats/{thread}, viewports desktop+narrow | Received WeChat Channels cards with their cover, play button, publisher and length.
-scene chat-filters | route /{server}/{account}/chats, viewports desktop+compact | The conversation filter bar with All pinned beside the scrolling categories and unread badges for categories with new messages.
-scene chat-info | route /{server}/{account}/chats/{thread}/info, viewports desktop+narrow | Details of a group conversation with its pin, mute and group settings.
-scene chat-list | route /{server}/{account}/chats, viewports desktop+narrow | The full inbox with category and conversation unread counts and the newest conversation open beside it.
-scene composer-attachments | route /{server}/{account}/chats/{thread}, viewports desktop+narrow+compact | A photo and a video staged in the message box with previews, sizes, remove buttons and the unchecked Original choice.
-scene composer-attachments-original | route /{server}/{account}/chats/{thread}, viewports desktop+narrow+compact | Original checked for a staged photo and video, with help that explains what it adds for each.
-scene contact-details | route /{server}/{account}/contacts, viewports desktop+compact | A saved contact card reached from the contact list by its keyboard-accessible Details action.
-scene contact-details-remove | route /{server}/{account}/contacts, viewports desktop+compact | Remove contact opens a distinct confirmation that preserves chat history and recovers an uncertain result with the original key.
-scene contact-details-search | route /{server}/{account}/contacts, viewports desktop+compact | Saved-contact search offers separate Message and Details actions; Details opens the shared card.
-scene contact-details-sidebar | route /{server}/{account}/chats/{thread}/info, viewports desktop | A direct-conversation sidebar opens the same contact card and its checked privacy/removal actions.
-scene contact-privacy-cached | route /{server}/{account}/contacts, viewports desktop+compact | Contact details reopen with prefetched canonical privacy and no per-contact lookup.
-scene contact-privacy-retry | route /{server}/{account}/contacts, viewports desktop | An uncertain privacy save locks edits and retries only the same inspected intent.
-scene contact-privacy-saved | route /{server}/{account}/contacts, viewports desktop+compact | Moments selections survive Chats Only and save with the original privacy version.
-scene contact-privacy-syncing | route /{server}/{account}/contacts, viewports desktop+compact | One accepted PATCH waits through pending canonical GETs before showing saved settings, without another mutation.
-scene contact-privacy-unavailable | route /{server}/{account}/contacts, viewports desktop+compact | Missing administrator permission disables privacy edits and submission.
-scene contact-request-retry | route /{server}/{account}/contacts, viewports desktop | A lost submission response keeps the original key and greeting until an inspected retry completes.
-scene contact-search-other-people | route /{server}/{account}/contacts, viewports desktop+compact | Empty search shows saved contacts; typing adds a separate Other people section with clear source/membership labels and a separate WeChat discovery result.
-scene contact-search-saved-only | route /{server}/{account}/contacts, viewports desktop+compact | Empty search shows saved contacts; typing adds a separate Other people section with clear source/membership labels and a separate WeChat discovery result.
-scene contact-search-without-reference | route /{server}/{account}/contacts, viewports desktop+compact | A server match without request material offers View and cannot send a friend request.
-scene contacts | route /{server}/{account}/contacts, viewports desktop | The contact list of an account.
+scene account-menu | route /{server}/{account}/chats, viewports desktop | The account popover at the top of the rail, with its connection rows and sign-out.
+scene ai-chat | route /{server}/{account}/chats, viewports desktop+narrow | The AI chat panel, opened from the rail, with no service configured yet.
+scene chat-filters | route /{server}/{account}/chats, viewports desktop+compact | The conversation filter tabs, the collapsed service categories and their unread badges.
+scene chat-info | route /{server}/{account}/chats/{thread}/info, viewports desktop+narrow | Details of a group conversation with its cached members and conversation flags.
+scene chat-list | route /{server}/{account}/chats, viewports desktop+narrow | The inbox with its filter tabs and unread badges, and the welcome pane beside it.
+scene contacts | route /{server}/{account}/contacts, viewports desktop | The contact list of an account, grouped by contact kind.
+scene desktop-hub-connect | route /servers, viewports desktop+narrow | The desktop app's hub picker, shown when no hub has been connected yet.
 scene desktop-leftover-hub | route /servers, viewports desktop+narrow | The desktop app's first screen when a hub left running by an earlier session holds the local port.
 scene desktop-settings | route /servers, viewports desktop+narrow | Desktop settings, including whether this device's hub keeps running while another hub is used.
 scene direct-chat | route /{server}/{account}/chats/{thread}, viewports desktop+narrow | A direct conversation with text from both sides and a photo.
