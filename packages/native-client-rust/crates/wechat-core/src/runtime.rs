@@ -169,6 +169,10 @@ pub struct CoreShared {
     /// Attachments whose whole content was checked, so a byte range of them can
     /// be served without reading the rest; see `media_content_stream`.
     pub(crate) verified_content: Mutex<crate::media::VerifiedContent>,
+    /// Per-(account, operation-kind) admission gates so one mutating kind runs
+    /// at a time per account; see `lock_operation`.
+    pub(crate) operation_gates:
+        Mutex<std::collections::BTreeMap<(String, String), Arc<AsyncMutex<()>>>>,
 }
 pub(crate) struct DownloadPermit {
     _account: tokio::sync::OwnedSemaphorePermit,
@@ -466,6 +470,7 @@ impl Core {
                 read_pools: Mutex::new(BTreeMap::new()),
                 media_cache: crate::media_cache::MediaDiskCache::new(media_cache_root),
                 verified_content: Mutex::new(Default::default()),
+                operation_gates: Mutex::new(BTreeMap::new()),
             }),
         });
         for account in core.store.accounts()? {
@@ -621,6 +626,23 @@ impl Core {
     }
     pub async fn lock_account(&self, account: &str) -> Result<tokio::sync::OwnedMutexGuard<()>> {
         Ok(self.gate(account)?.lock_owned().await)
+    }
+    /// Admit one operation of `kind` per account at a time. Take before the
+    /// account lock and keep across the whole submission.
+    pub(crate) async fn lock_operation(
+        &self,
+        account: &str,
+        kind: &str,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>> {
+        self.store.account(account)?;
+        let gate = self
+            .operation_gates
+            .lock()
+            .map_err(|_| anyhow::anyhow!("operation manager unavailable"))?
+            .entry((account.to_owned(), kind.to_owned()))
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone();
+        Ok(gate.lock_owned().await)
     }
     pub(crate) async fn download_permit(&self, account: &str) -> Result<DownloadPermit> {
         self.store.account(account)?;

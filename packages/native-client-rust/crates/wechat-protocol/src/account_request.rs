@@ -12,7 +12,8 @@ pub struct AccountRequest<'a> {
 }
 
 macro_rules! operation {
-    ($name:ident($($arg:ident: $ty:ty),*) -> $result:ty => $raw:ident) => {
+    ($(#[$meta:meta])* $name:ident($($arg:ident: $ty:ty),*) -> $result:ty => $raw:ident) => {
+        $(#[$meta])*
         pub fn $name(&mut self, $($arg: $ty),*) -> Result<$result> {
             self.admit()?;
             self.transport.$raw(self.state, $($arg),*)

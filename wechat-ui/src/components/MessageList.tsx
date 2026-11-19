@@ -79,13 +79,27 @@ export default function MessageList() {
     el.scrollTop = el.scrollHeight
   }, [])
 
-  /** Centers the target message; nothing happens when it is not rendered. */
+  /**
+   * Centers the target message; nothing happens when it is not rendered.
+   *
+   * The list follows the newest message while `stickToBottom` is set, so this
+   * clears it first: otherwise the next commit (a media lookup, a decoded
+   * image, a re-render) scrolls the user away from the message they jumped to.
+   */
   const scrollToMessage = useCallback((id: string): void => {
     const el = scrollerRef.current
     if (!el)
       return
-    const target = el.querySelector<HTMLElement>('[data-mid="' + CSS.escape(id) + '"]')
+    stickToBottom.current = false
+    const selector = '[data-mid="' + CSS.escape(id) + '"]'
+    const target = el.querySelector<HTMLElement>(selector)
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    // Media can decode after the first scroll and shift the layout; center the
+    // message once more when that happens.
+    const settle = window.setTimeout(() => {
+      el.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: 'center' })
+    }, 400)
+    window.setTimeout(() => window.clearTimeout(settle), 2000)
   }, [])
 
   const isAtBottom = useCallback((): boolean => stickToBottom.current, [])

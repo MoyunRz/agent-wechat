@@ -135,8 +135,15 @@ export const scenes = [
       });
     },
     ready: async ({ page, expect }) => {
-      for (const name of ["Mei Chen", "Daniel Park", "Weekend trip", "City Library", "Metro Alerts"])
+      for (const name of ["Mei Chen", "Daniel Park", "Weekend trip"])
         await expect(row(page, name)).toBeVisible();
+      // Service notifications collapse into one aggregate row each.
+      const categories = page.locator(".thread-item.category-row");
+      await expect(categories).toHaveCount(2);
+      await expect(categories.filter({ hasText: "Service Notifications" })).toBeVisible();
+      await expect(categories.filter({ hasText: "WeCom" })).toBeVisible();
+      await expect(row(page, "City Library")).toHaveCount(0);
+      await expect(row(page, "Metro Alerts")).toHaveCount(0);
     },
     actions: async ({ page, expect }) => {
       const tabs = page.locator(".filter-tabs");
@@ -147,13 +154,24 @@ export const scenes = [
       const groups = tab("Groups");
       const wecom = tab("WeCom");
       const service = tab("Service Notifications");
+      const categoryRows = page.locator(".thread-item.category-row");
+      const serviceCategory = categoryRows.filter({ hasText: "Service Notifications" });
+      const wecomCategory = categoryRows.filter({ hasText: "WeCom" });
       const mei = row(page, "Mei Chen");
       const daniel = row(page, "Daniel Park");
       const trip = row(page, "Weekend trip");
       const library = row(page, "City Library");
       const metro = row(page, "Metro Alerts");
 
+      // Opening a category row reveals its indented conversations.
       await expect(all).toHaveClass(/active/);
+      await serviceCategory.click();
+      await expect(library).toBeVisible();
+      await expect(library).toHaveClass(/nested/);
+      await wecomCategory.click();
+      await expect(metro).toBeVisible();
+      await expect(metro).toHaveClass(/nested/);
+
       await direct.click();
       await expect(direct).toHaveClass(/active/);
       await expect(mei).toBeVisible();
@@ -163,6 +181,7 @@ export const scenes = [
       await unread.click();
       await expect(unread).toHaveClass(/active/);
       await expect(trip).toBeVisible();
+      await expect(metro).toBeVisible();
       await groups.click();
       await expect(groups).toHaveClass(/active/);
       await expect(trip).toBeVisible();
@@ -177,26 +196,18 @@ export const scenes = [
       await expect(metro).toHaveCount(0);
       await expect(mei).toHaveCount(0);
 
-      // With no filter the categories collapse into one row each; opening them
-      // reveals the indented conversations.
+      // Back to every conversation: the categories keep their expanded state.
       await all.click();
       await expect(all).toHaveClass(/active/);
       await expect(trip).toBeVisible();
-      await expect(library).toHaveCount(0);
-      const serviceCategory = page.locator(".thread-item.category-row").filter({ hasText: "Service Notifications" });
-      const wecomCategory = page.locator(".thread-item.category-row").filter({ hasText: "WeCom" });
-      await expect(serviceCategory).toBeVisible();
-      await serviceCategory.click();
       await expect(library).toBeVisible();
-      await expect(library).toHaveClass(/nested/);
-      await wecomCategory.click();
       await expect(metro).toBeVisible();
 
       const search = page.getByPlaceholder("Search chats");
       await search.fill("Mei");
       await expect(mei).toBeVisible();
       await expect(library).toHaveCount(0);
-      await expect(page.locator(".thread-item.category-row")).toHaveCount(0);
+      await expect(categoryRows).toHaveCount(0);
       await search.clear();
       await search.blur();
       await expect(library).toBeVisible();

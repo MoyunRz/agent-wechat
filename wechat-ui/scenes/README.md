@@ -15,7 +15,7 @@ From the repository root:
 ```bash
 pnpm install --frozen-lockfile          # shared SDK build
 npm --prefix wechat-ui ci               # app, Playwright and Argos
-(cd wechat-ui && npx playwright install --with-deps chromium)
+(cd wechat-ui && npx playwright install chromium)   # add --with-deps on Linux CI hosts
 ```
 
 The scenes capture Simplified Chinese as well. Install Noto CJK and Noto Color
@@ -43,7 +43,7 @@ The runner builds `@agent-wechat/shared` and the simulator when needed. Set
 | `stack.mjs` | Disposable simulator and hub for one scene |
 | `seed.mjs`, `accounts.mjs` | Synthetic data shared by the scenes |
 | `desktop.mjs` | Desktop bridge stand-in for desktop-only screens |
-| `routes.ts` | Route patterns the scenes open; keep in sync with the app |
+| `routes.ts` | Re-exports the app route table in `src/platform/routes.ts`; the scenes open those patterns |
 | `listing.mjs` | Writes `interfaces/ui/scenes.txt` |
 | `run.mjs` | Builds prerequisites and runs Playwright |
 
