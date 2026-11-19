@@ -509,10 +509,12 @@ export function ContactRequestDialog({
   }
   async function change(action: "send" | "accept" | "delete" | "remove") {
     if (busy || receipt) return;
+    const recipientRef = discovery?.recipientRef;
+    if (action === "send" && !recipientRef) return;
     const pending: ContactReceipt = {
       key: crypto.randomUUID(),
       action,
-      ...(discovery ? { input: { recipientRef: discovery.recipientRef, message: greeting } } : {}),
+      ...(discovery ? { input: { recipientRef: recipientRef!, message: greeting } } : {}),
     };
     save(pending);
     await submit(pending);
@@ -633,7 +635,7 @@ export function ContactRequestDialog({
         )}
         {!receipt && (removal || discovery || request?.actionable) && (
           <button
-            disabled={busy || (!!discovery && !greeting.trim())}
+            disabled={busy || (!!discovery && (!greeting.trim() || !discovery.recipientRef))}
             onClick={() => void change(removal ? "remove" : discovery ? "send" : "accept")}
           >
             {removal

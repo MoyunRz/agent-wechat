@@ -467,12 +467,17 @@ export const wechatApi = {
     return request<ContactRequest>(`/accounts/${enc(accountId)}/contact-requests/${enc(id)}`)
   },
 
-  /** Accept the inspected request version; the daemon re-checks it before sending. */
-  acceptContactRequest(accountId: string, id: string, expectedVersion: string): Promise<Operation> {
+  /** Accept the inspected request version with optional initial relationship privacy. */
+  acceptContactRequest(
+    accountId: string,
+    id: string,
+    expectedVersion: string,
+    privacy?: ContactPrivacySettings,
+  ): Promise<Operation> {
     return jsonRequest<Operation>(
       `/accounts/${enc(accountId)}/contact-requests/${enc(id)}/accept`,
       'POST',
-      { expectedVersion },
+      { expectedVersion, privacy },
       { 'Idempotency-Key': idempotencyKey('contact-accept') },
     )
   },

@@ -1913,6 +1913,31 @@
         ],
         "type": "object"
       },
+      "NativeContactRequestAccept": {
+        "additionalProperties": false,
+        "description": "Accept the inspected request with optional initial relationship privacy.",
+        "properties": {
+          "expectedVersion": {
+            "description": "Current request version returned by get/list.",
+            "type": "string"
+          },
+          "privacy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeContactPrivacySettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial relationship privacy; omission keeps the supported default."
+          }
+        },
+        "required": [
+          "expectedVersion"
+        ],
+        "type": "object"
+      },
       "NativeContactRequestMessage": {
         "description": "One saved verification-history entry without protocol tickets or XML.",
         "properties": {
@@ -2095,8 +2120,11 @@
             "type": "integer"
           },
           "recipientRef": {
-            "description": "Opaque recipient material; pass unchanged to send.",
-            "type": "string"
+            "description": "Opaque send reference when verification material is available; null for matches without it.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "request": {
             "anyOf": [
@@ -5912,7 +5940,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NativeContactRequestVersion"
+                "$ref": "#/components/schemas/NativeContactRequestAccept"
               }
             }
           },

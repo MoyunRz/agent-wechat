@@ -11,7 +11,7 @@ import { formatRequestTime, requestName, requestStatus } from '../contact-reques
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
-import type { Contact, ContactRequest, Operation } from '../types'
+import type { Contact, ContactPrivacySettings, ContactRequest, Operation } from '../types'
 import {
   loadContactDirectory,
   openContactEditor,
@@ -22,6 +22,7 @@ import {
 } from '../store/actions'
 import { useStore } from '../store/hooks'
 import { registerContactsPanelView } from '../store/viewRefs'
+import ContactPrivacyFields, { defaultContactPrivacy } from './ContactPrivacyFields'
 import Icon from './Icon'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contacts.css'
@@ -166,6 +167,7 @@ export default function ContactsPanel() {
   const [accepting, setAccepting] = useState<Record<string, boolean>>({})
   const [requestError, setRequestError] = useState('')
   const [detailRequest, setDetailRequest] = useState<ContactRequest | null>(null)
+  const [requestPrivacy, setRequestPrivacy] = useState<ContactPrivacySettings>(defaultContactPrivacy)
   // Contact folds open by default; the other categories start collapsed, as in
   // the Linux client.
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -398,6 +400,7 @@ export default function ContactsPanel() {
 
   function openDetail(item: ContactRequest): void {
     setRequestError('')
+    setRequestPrivacy(defaultContactPrivacy())
     setDetailRequest(item)
   }
 
@@ -420,7 +423,7 @@ export default function ContactsPanel() {
     const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '删除申请记录失败，请稍后重试。'
     try {
       let operation = action === 'accept'
-        ? await wechatApi.acceptContactRequest(account, item.id, item.version)
+        ? await wechatApi.acceptContactRequest(account, item.id, item.version, requestPrivacy)
         : await wechatApi.deleteContactRequest(account, item.id, item.version)
       for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
         await sleep(SYNC_POLL_INTERVAL)
@@ -763,6 +766,12 @@ export default function ContactsPanel() {
               <div className={`detail-status ${detailRequest.actionable ? 'ready' : 'blocked'}`}>
                 {t(requestStatus(detailRequest))}
               </div>
+              <ContactPrivacyFields
+                value={requestPrivacy}
+                onChange={setRequestPrivacy}
+                disabled={accepting[detailRequest.id] === true || !detailRequest.actionable}
+                hint="通过前选择你愿意共享的内容。"
+              />
               {requestError && <div className="detail-status blocked">{t(requestError)}</div>}
             </div>
             <div className="detail-actions">

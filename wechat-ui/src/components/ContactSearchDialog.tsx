@@ -268,6 +268,11 @@ export default function ContactSearchDialog({
     const message = requestMessage.trim()
     if (!account || !current || !message || sending)
       return
+    const recipientRef = current.recipientRef
+    if (!recipientRef) {
+      setSendError('该结果没有好友申请凭证，请重新搜索。')
+      return
+    }
     setSending(true)
     setSendError('')
     const privacy: ContactPrivacySettings = chatsOnly
@@ -275,7 +280,7 @@ export default function ContactSearchDialog({
       : { chatsOnly: false, hideMyPosts, hideTheirPosts }
     try {
       let operation = await wechatApi.sendContactRequest(account, {
-        recipientRef: current.recipientRef,
+        recipientRef,
         message,
         privacy,
       })
@@ -508,7 +513,7 @@ export default function ContactSearchDialog({
                   <ThreadAvatar
                     accountId={accountId}
                     name={discovery.displayName}
-                    username={discovery.recipientRef}
+                    username={discovery.recipientRef ?? discovery.contactId ?? discovery.displayName}
                     size={38}
                   />
                   <span className="contact-meta">
@@ -533,15 +538,17 @@ export default function ContactSearchDialog({
                         )
                       : sent
                         ? <span className="discovery-chip">{t('已发送申请')}</span>
-                        : (
-                            <button
-                              type="button"
-                              className="contact-action"
-                              onClick={() => setRequestOpen(open => !open)}
-                            >
-                              {t('添加好友')}
-                            </button>
-                          )}
+                        : discovery.recipientRef
+                          ? (
+                              <button
+                                type="button"
+                                className="contact-action"
+                                onClick={() => setRequestOpen(open => !open)}
+                              >
+                                {t('添加好友')}
+                              </button>
+                            )
+                          : null}
                 </div>
 
                 {discovery.request?.direction === 'incoming' && (
@@ -551,8 +558,11 @@ export default function ContactSearchDialog({
                   <p className="discovery-note">{t('申请已发送，等待对方确认。')}</p>
                 )}
                 {sent && <p className="discovery-note">{t('好友申请已发送，等待对方确认。')}</p>}
+                {!discovery.contactId && !discovery.request && !sent && !discovery.recipientRef && (
+                  <p className="discovery-note">{t('该结果没有好友申请凭证，请重新搜索。')}</p>
+                )}
 
-                {requestOpen && !discovery.contactId && !discovery.request && (
+                {requestOpen && discovery.recipientRef && !discovery.contactId && !discovery.request && (
                   <form
                     className="discovery-form"
                     onSubmit={(event) => {

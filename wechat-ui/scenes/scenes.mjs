@@ -395,6 +395,7 @@ export const scenes = [
       const dialog = page.locator(".requests-detail");
       await expect(dialog).toBeVisible();
       await expect(dialog.getByText("Request history")).toBeVisible();
+      await expect(dialog.getByText("Relationship privacy")).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Accept", exact: true })).toBeVisible();
     },
   },

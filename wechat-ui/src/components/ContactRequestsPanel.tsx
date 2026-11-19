@@ -13,12 +13,13 @@ import {
 } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { useT } from '../i18n/useT'
-import type { ContactRequest } from '../types'
+import type { ContactPrivacySettings, ContactRequest } from '../types'
 import {
   loadContactDirectory,
   refreshFriendRequestCount,
 } from '../store/actions'
 import { useStore } from '../store/hooks'
+import ContactPrivacyFields, { defaultContactPrivacy } from './ContactPrivacyFields'
 import Icon from './Icon'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-requests.css'
@@ -70,6 +71,7 @@ export default function ContactRequestsPanel() {
   const [detail, setDetail] = useState<ContactRequest | null>(null)
   const [busyId, setBusyId] = useState('')
   const [actionError, setActionError] = useState('')
+  const [privacy, setPrivacy] = useState<ContactPrivacySettings>(defaultContactPrivacy)
 
   const loadTokenRef = useRef(0)
   const accountIdRef = useRef(accountId)
@@ -140,6 +142,7 @@ export default function ContactRequestsPanel() {
   async function openDetail(item: ContactRequest): Promise<void> {
     setDetail(item)
     setActionError('')
+    setPrivacy(defaultContactPrivacy())
     const account = accountIdRef.current
     if (!account)
       return
@@ -161,7 +164,7 @@ export default function ContactRequestsPanel() {
     const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '删除申请记录失败，请稍后重试。'
     try {
       let operation = action === 'accept'
-        ? await wechatApi.acceptContactRequest(account, item.id, item.version)
+        ? await wechatApi.acceptContactRequest(account, item.id, item.version, privacy)
         : await wechatApi.deleteContactRequest(account, item.id, item.version)
       for (let attempt = 0; attempt < OPERATION_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
         await sleep(OPERATION_POLL_MS)
@@ -335,6 +338,13 @@ export default function ContactRequestsPanel() {
               <div className={`detail-status ${detail.actionable ? 'ready' : 'blocked'}`}>
                 {t(requestStatus(detail))}
               </div>
+
+              <ContactPrivacyFields
+                value={privacy}
+                onChange={setPrivacy}
+                disabled={busyId === detail.id || !detail.actionable}
+                hint="通过前选择你愿意共享的内容。"
+              />
 
               {detail.history.length > 0 && (
                 <details className="requests-history">

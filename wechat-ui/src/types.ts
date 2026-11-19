@@ -283,7 +283,8 @@ export type ContactRequestPage = {
 /** A person discovered on WeChat before a friend request is sent. */
 export type ContactDiscovery = {
   displayName: string
-  recipientRef: string
+  /** Opaque send reference; null when this match cannot receive a request. */
+  recipientRef: string | null
   expiresAt: number
   source: string
   request: ContactRequest | null

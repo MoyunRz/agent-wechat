@@ -115,5 +115,7 @@
   "请先刷新联系人资料，再设置关系隐私。": "Refresh the contact before changing privacy.",
   "备注最多 256 字节，请缩短后重试。": "Remarks are limited to 256 bytes. Shorten it and try again.",
   "正在读取联系人资料…": "Reading contact details…",
-  "读取联系人资料失败，请稍后重试。": "Could not read the contact details. Please try again later."
+  "读取联系人资料失败，请稍后重试。": "Could not read the contact details. Please try again later.",
+  "通过前选择你愿意共享的内容。": "Choose what you share before accepting the request.",
+  "该结果没有好友申请凭证，请重新搜索。": "This result has no friend-request reference. Search again to try adding this person."
 }
