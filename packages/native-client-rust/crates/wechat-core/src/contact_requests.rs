@@ -640,13 +640,34 @@ impl Core {
         let options = self.write_options(account, intent)?;
         let state = self.account_state(account)?;
         if !location.root().join("db_storage").join(rel).exists() {
-            let key = wechat_profile::apply_initialize_contact_requests(
+            // Prefer the fully verified path. When the server rotated the
+            // database password after these databases were keyed, the cached
+            // keys still open them while the password no longer derives them;
+            // blocking the new database on that mismatch would wedge every
+            // friend-request projection behind it forever.
+            let initialized = wechat_profile::apply_initialize_contact_requests(
                 &location,
                 &keys,
                 &state.database_password,
                 &options,
-            )?;
-            keys.databases.insert(rel.into(), key);
+            )
+            .or_else(|error| {
+                if matches!(error, wechat_profile::ProfileError::KeyMismatch(_)) {
+                    eprintln!(
+                        "profile password rotated: creating {rel} without the cross-database \
+                         password check ({error:#})"
+                    );
+                    wechat_profile::initialize_contact_requests_database(
+                        &location,
+                        &keys,
+                        &state.database_password,
+                        &options,
+                    )
+                } else {
+                    Err(error)
+                }
+            })?;
+            keys.databases.insert(rel.into(), initialized);
         } else {
             let mut derived = wechat_profile::keys_from_password(
                 location,

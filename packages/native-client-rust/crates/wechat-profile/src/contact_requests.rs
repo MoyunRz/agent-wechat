@@ -548,7 +548,32 @@ pub fn apply_contact_request_deletion(
 /// its protected manifest and recovers a crash after publication by admitting
 /// the existing file with the same authenticated password. Requires ownership
 /// and a durable intent; other official subsystem schemas are not initialized.
+///
+/// This variant first re-derives every existing database key from `password`,
+/// so the profile stays openable by one password. When the server rotated the
+/// database password after the profile was keyed, that re-derivation fails on
+/// the older databases; callers holding cached keys that still open them can
+/// use [`initialize_contact_requests_database`] instead.
 pub fn apply_initialize_contact_requests(
+    location: &crate::ProfileLocation,
+    keys: &crate::KeyFile,
+    password: &[u8],
+    options: &crate::WriteOptions,
+) -> Result<crate::DatabaseKey> {
+    if password.len() != 32 {
+        return Err(ProfileError::InvalidKeysFile);
+    }
+    crate::verify_profile_password(location, keys, password)?;
+    initialize_contact_requests_database(location, keys, password, options)
+}
+
+/// Create only a missing general.db without re-deriving the existing database
+/// keys from `password`. Same guarantees as [`apply_initialize_contact_requests`]
+/// except the cross-database password check: use it when the cached keys still
+/// open every existing database and the password no longer derives them, which
+/// a server-side password rotation produces between logins. The new database is
+/// still keyed with `password` so its manifest entry stays password-derived.
+pub fn initialize_contact_requests_database(
     location: &crate::ProfileLocation,
     keys: &crate::KeyFile,
     password: &[u8],
@@ -559,7 +584,6 @@ pub fn apply_initialize_contact_requests(
     if password.len() != 32 {
         return Err(ProfileError::InvalidKeysFile);
     }
-    crate::verify_profile_password(location, keys, password)?;
     let relative = "general/general.db";
     let directory = location.storage.join("general");
     if !directory.exists() {

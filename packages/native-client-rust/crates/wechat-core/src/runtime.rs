@@ -2587,6 +2587,13 @@ impl Core {
                         complete = false;
                         unsupported += 1;
                         blocked_count += 1;
+                        // The retained blocker classifies known shapes only; the
+                        // full chain goes to stderr so an unexpected failure can
+                        // be diagnosed from the daemon log.
+                        eprintln!(
+                            "projection blocked: batch={batch_id} command={} error={error:#}",
+                            command.id
+                        );
                         if blockers.len() < 50 {
                             blockers.push(sync_projection::projection_blocker(&error).unwrap_or_else(||json!({"commandId":command.id,"reason":"unsupported_or_unavailable_profile"})));
                         }
