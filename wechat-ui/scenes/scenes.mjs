@@ -521,6 +521,25 @@ export const scenes = [
     },
   },
   {
+    name: "settings-category",
+    route: "settings",
+    description: "A settings category opened from the directory on a phone, covering the tab bar.",
+    viewports: ["narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      const popover = page.locator(".settings-popover");
+      await expect(popover).toBeVisible();
+      await popover.getByRole("button", { name: /Account and connection/ }).click();
+      const overlay = page.locator(".settings-overlay");
+      await expect(overlay).toBeVisible();
+      // The overlay is fixed to the viewport, not to the 50px tab bar.
+      const box = await overlay.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThan(600);
+      await expect(page.locator(".settings-modal")).toBeVisible();
+    },
+  },
+  {
     name: "ai-chat",
     route: "chats",
     description: "The AI chat panel, opened from the rail, with no service configured yet.",
@@ -531,10 +550,52 @@ export const scenes = [
       await expect(page.locator(".thread-sidebar")).toBeVisible();
     },
     actions: async ({ page, expect }) => {
-      await page.locator(".app-rail").getByTitle("AI Chat").click();
+      await page.locator('.rail-button[data-view="ai"]').click();
       const panel = page.locator(".ai-page");
       await expect(panel).toBeVisible();
+      // Phones start on the session list; desktops already show the conversation.
+      await panel.locator(".ai-new-session").click();
       await expect(panel.getByText("Start a new conversation with the AI assistant.")).toBeVisible();
+      // The session list keeps the bottom bar; an open conversation takes the whole screen.
+      if ((page.viewportSize()?.width ?? 0) <= 768)
+        await expect(page.locator(".app-rail")).toBeHidden();
+    },
+  },
+  {
+    name: "ai-sessions",
+    route: "chats",
+    description: "The AI session list on a phone, with the new-conversation button and the archived section.",
+    viewports: ["narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".thread-sidebar")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator('.rail-button[data-view="ai"]').click();
+      const panel = page.locator(".ai-page");
+      await expect(panel).toHaveClass(/is-mobile-list/);
+      await expect(panel.getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
+      // The session list behaves like the chats and contacts lists: the tab bar stays.
+      await expect(page.locator(".app-rail")).toBeVisible();
+    },
+  },
+  {
+    name: "ai-settings",
+    route: "chats",
+    description: "The AI service settings dialog on a phone, with its model and reasoning selects.",
+    viewports: ["narrow"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".thread-sidebar")).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator('.rail-button[data-view="ai"]').click();
+      const panel = page.locator(".ai-page");
+      await expect(panel).toBeVisible();
+      await panel.locator(".ai-head .ai-icon-button").click();
+      await expect(page.locator(".ai-settings")).toBeVisible();
     },
   },
   {

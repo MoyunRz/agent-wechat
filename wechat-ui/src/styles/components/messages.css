@@ -118,7 +118,7 @@
   opacity: 0.72;
 }
 
-/* Image loading placeholder: a 60x60 square with a spinner (media in flight). */
+/* Image loading placeholder: a 60x60 square with loading dots (media in flight). */
 .image-loading-box {
   display: grid;
   place-items: center;
@@ -127,15 +127,7 @@
   border-radius: 12px;
   background: var(--panel-soft);
   box-shadow: var(--media-shadow);
-}
-
-.image-spinner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--muted-soft);
-  border-top-color: var(--accent);
-  animation: spin 0.8s linear infinite;
+  color: var(--muted);
 }
 
 /* Non-sticker images open a lightbox: the cursor offers the zoom. */

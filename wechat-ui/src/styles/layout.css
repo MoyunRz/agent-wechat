@@ -24,6 +24,16 @@
   display: none;
 }
 
+/* Lazy views (the AI panel) render nothing while their chunk loads. This
+   placeholder fills the area above the phone tab bar and shows loading dots. */
+.shell-pending {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-height: 0;
+  color: var(--muted);
+}
+
 /* Desktop-only chrome sits outside the chat column. */
 .desktop-notice {
   flex: 0 0 auto;

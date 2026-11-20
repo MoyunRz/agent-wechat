@@ -117,5 +117,7 @@
   "正在读取联系人资料…": "Reading contact details…",
   "读取联系人资料失败，请稍后重试。": "Could not read the contact details. Please try again later.",
   "通过前选择你愿意共享的内容。": "Choose what you share before accepting the request.",
-  "该结果没有好友申请凭证，请重新搜索。": "This result has no friend-request reference. Search again to try adding this person."
+  "该结果没有好友申请凭证，请重新搜索。": "This result has no friend-request reference. Search again to try adding this person.",
+  "这是你自己的账号，不能在这里修改资料。": "This is your own account; it cannot be edited here.",
+  "该联系人不是普通好友，或资料尚未同步，暂时不能修改备注和关系隐私。": "This contact is not an ordinary friend, or its profile has not synced; remarks and relationship privacy cannot be changed yet."
 }

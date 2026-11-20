@@ -509,10 +509,6 @@
   background: rgba(248, 113, 113, 0.08);
 }
 
-.state-icon.spinning svg {
-  animation: spin 1.1s linear infinite;
-}
-
 .qr-frame {
   display: grid;
   place-items: center;

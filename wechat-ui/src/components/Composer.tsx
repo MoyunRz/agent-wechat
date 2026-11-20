@@ -27,6 +27,7 @@ import { useStore } from '../store/hooks'
 import { registerComposerView } from '../store/viewRefs'
 import type { MentionOption, StagedAttachment } from '../types'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import type { IconName } from './Icon'
 import '../styles/components/composer.css'
 
@@ -420,7 +421,7 @@ export default function Composer() {
               {mentionLoading && mentionOptions.length === 0
                 ? (
                   <div className="mention-empty">
-                    <Icon name="refresh" size={12} className="spin" />
+                    <LoadingDots />
                     {t('成员加载中…')}
                   </div>
                 )
@@ -506,7 +507,7 @@ export default function Composer() {
             >
               <span>{t('发送')}</span>
               {sending
-                ? <Icon name="refresh" size={14} className="spin" />
+                ? <LoadingDots />
                 : <Icon name="send" size={14} />}
             </button>
           </div>

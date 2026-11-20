@@ -401,4 +401,53 @@
   .search-wrap input {
     font-size: 16px;
   }
+
+  /* Phone: hairline separators between conversation rows, starting where the
+     text column starts (after the avatar), like the system list. */
+  .thread-scroll {
+    padding: 0 0 12px;
+  }
+
+  .thread-item {
+    position: relative;
+    padding: 10px 12px;
+    border-radius: 0;
+  }
+
+  .thread-item::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 69px; /* row padding 12 + avatar 46 + gap 11 */
+    height: 0.1px;
+    background: var(--border);
+  }
+
+  .thread-item.nested::after {
+    left: 79px;
+  }
+
+  .thread-item:last-child::after {
+    display: none;
+  }
+
+  /* Phone: the text column and the date/badge column share widths, so the
+     preview stops at the date column instead of running to the right edge. */
+  .thread-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 3px;
+  }
+
+  .thread-main > .thread-row {
+    display: contents;
+  }
+
+  .thread-time,
+  .thread-badges {
+    justify-self: end;
+  }
 }

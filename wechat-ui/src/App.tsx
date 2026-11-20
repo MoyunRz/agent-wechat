@@ -64,6 +64,7 @@ import ContactSearchDialog from './components/ContactSearchDialog'
 import ContactsPanel from './components/ContactsPanel'
 import GlobalSearchDialog from './components/GlobalSearchDialog'
 import Icon from './components/Icon'
+import LoadingDots from './components/LoadingDots'
 import LoginPanel from './components/LoginPanel'
 import MessageList from './components/MessageList'
 import ThreadAvatar from './components/ThreadAvatar'
@@ -215,7 +216,7 @@ export default function App() {
       <div className="app-shell">
         <div className="boot-screen">
           <span className="boot-logo"><img src={brandLogoUrl} alt="Agent WeChat" width={58} height={58} /></span>
-          <span className="boot-spinner"><Icon name="refresh" size={16} className="spin" /></span>
+          <span className="boot-spinner"><LoadingDots /></span>
           <p>{t('正在连接本机 Hub')}</p>
         </div>
       </div>
@@ -236,7 +237,7 @@ export default function App() {
       <div className="app-shell">
         <div className="boot-screen">
           <span className="boot-logo"><img src={brandLogoUrl} alt="Agent WeChat" width={58} height={58} /></span>
-          <span className="boot-spinner"><Icon name="refresh" size={16} className="spin" /></span>
+          <span className="boot-spinner"><LoadingDots /></span>
           <p>{t('正在加载微信会话')}</p>
         </div>
       </div>
@@ -302,11 +303,11 @@ export default function App() {
   return (
     <div className="app-shell-wrap">
       <DesktopUpdateBanner />
-      <div className={`app-shell${isNarrow ? ' is-narrow' : ''}${mobileChatOpen ? ' chat-open' : ''}`}>
+      <div className={`app-shell${isNarrow ? ' is-narrow' : ''}${mobileChatOpen ? ' chat-open' : ''}${railView === 'ai' ? ' ai-open' : ''}`}>
         <AppRail />
 
       {railView === 'ai'
-        ? <Suspense fallback={null}><AiChatPanel account={account} /></Suspense>
+        ? <Suspense fallback={<div className="shell-pending"><LoadingDots /></div>}><AiChatPanel account={account} /></Suspense>
         : (
           <>
             <div className="rail-slot" hidden={railView !== 'chats'}><ThreadList /></div>
@@ -376,7 +377,9 @@ export default function App() {
                           disabled={manualRefreshing}
                           onClick={() => void refreshActiveMessages()}
                         >
-                          <Icon name="refresh" size={16} className={manualRefreshing ? 'spin' : undefined} />
+                          {manualRefreshing
+                            ? <LoadingDots />
+                            : <Icon name="refresh" size={16} />}
                         </button>
                       </div>
                     </>
@@ -421,7 +424,7 @@ export default function App() {
                     )}
                   </div>
                   {searching
-                    ? <div className="thread-search-status"><Icon name="refresh" size={12} className="spin" />{t('搜索中…')}</div>
+                    ? <div className="thread-search-status"><LoadingDots />{t('搜索中…')}</div>
                     : searchResults.length === 0 && searchQuery.trim()
                       ? <div className="thread-search-status">{t('没有找到相关聊天记录')}</div>
                       : searchResults.length > 0
@@ -520,7 +523,7 @@ export default function App() {
 
                     {activeThread.kind !== 'group' && activeThread.kind !== 'system' && (
                       contactProfileLoading
-                        ? <div className="details-hint"><Icon name="refresh" size={12} className="spin" />{t('正在读取联系人资料…')}</div>
+                        ? <div className="details-hint"><LoadingDots />{t('正在读取联系人资料…')}</div>
                         : contactProfileError
                           ? <div className="details-hint error"><Icon name="alert" size={12} />{contactProfileError}</div>
                           : contactProfile
@@ -552,6 +555,7 @@ export default function App() {
                       {t('标记已读')}
                     </button>
                     {activeThread.kind === 'direct'
+                      && detailsPeerId !== account.ownUsername
                       && !detailsPeerId.startsWith('gh_')
                       && !detailsPeerId.endsWith('@openim') && (
                         <button type="button" className="details-action" onClick={() => openContactEditor(detailsPeerId)}>
@@ -560,7 +564,7 @@ export default function App() {
                         </button>
                       )}
                     <button type="button" className="details-action" disabled={manualRefreshing} onClick={() => void refreshActiveMessages()}>
-                      <Icon name="refresh" size={14} className={manualRefreshing ? 'spin' : undefined} />
+                      {manualRefreshing ? <LoadingDots /> : <Icon name="refresh" size={14} />}
                       {t('刷新会话')}
                     </button>
                   </div>

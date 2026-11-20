@@ -4,6 +4,7 @@ import { wechatApi, type AiConfig } from '../api'
 import { useT } from '../i18n/useT'
 import { renderMarkdown } from '../markdown'
 import type { AccountSummary } from '../types'
+import { useStore } from '../store/hooks'
 import Icon from './Icon'
 import '../styles/components/ai-chat.css'
 
@@ -129,7 +130,10 @@ function useFadePresence(open: boolean): { mounted: boolean, closing: boolean } 
 
 export default function AiChatPanel({ account }: AiChatPanelProps) {
   const t = useT()
+  const isNarrow = useStore(state => state.threads.isNarrow)
   const storeKey = `${SESSION_STORE_PREFIX}${account.id}`
+  /** Phone: the session list and the open conversation are two screens. */
+  const [mobileListOpen, setMobileListOpen] = useState(true)
 
   const [sessions, setSessions] = useState<AiSession[]>([])
   /** Archived conversations: hidden from the list, restorable from the sidebar. */
@@ -240,6 +244,7 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
       return
     setActiveId(id)
     setError('')
+    setMobileListOpen(false)
     scrollBottom()
   }
 
@@ -247,12 +252,16 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
     if (streaming)
       return
     // Do not stack another empty conversation on an existing empty one.
-    if (activeSession && !activeSession.messages.length)
+    if (activeSession && !activeSession.messages.length) {
+      setMobileListOpen(false)
+      scrollBottom()
       return
+    }
     const session = createSession()
     setSessions(list => [session, ...list])
     setActiveId(session.id)
     setError('')
+    setMobileListOpen(false)
     scrollBottom()
   }
 
@@ -686,6 +695,9 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // A phone keyboard's Enter inserts a newline; the send button submits.
+    if (isNarrow)
+      return
     // Mirrors @keydown.enter.exact.prevent: Enter alone sends, Shift+Enter wraps.
     if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey)
       return
@@ -693,12 +705,26 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
     void send()
   }
 
+  const mobileList = isNarrow && mobileListOpen
+  const mobileChat = isNarrow && !mobileListOpen
+
   return (
     <>
-      <section className="ai-page">
+      <section className={`ai-page${mobileList ? ' is-mobile-list' : ''}${mobileChat ? ' is-mobile-chat' : ''}`}>
         <header className="ai-head">
+          {isNarrow && mobileChat && (
+            <button
+              type="button"
+              className="icon-button back-button"
+              title={t('返回')}
+              aria-label={t('返回')}
+              onClick={() => setMobileListOpen(true)}
+            >
+              <Icon name="chevron-left" size={20} />
+            </button>
+          )}
           <div className="ai-heading">
-            <h2>{t('AI 对话')}</h2>
+            <h2>{mobileChat && activeSession ? sessionTitle(activeSession.title) : t('AI 对话')}</h2>
             <p className="ai-sub">
               {configLoading
                 ? t('正在读取 AI 配置…')
@@ -706,7 +732,7 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
             </p>
           </div>
           <div className="ai-head-actions">
-            {messages.length > 0 && (
+            {messages.length > 0 && !mobileList && (
               <button
                 className="ai-ghost"
                 type="button"
@@ -725,9 +751,16 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
 
         <div className="ai-body">
           <aside className="ai-sidebar">
-            <button className="ai-new-session" type="button" disabled={streaming} onClick={createNewSession}>
+            <button
+              className="ai-new-session"
+              type="button"
+              title={t('新建会话')}
+              aria-label={t('新建会话')}
+              disabled={streaming}
+              onClick={createNewSession}
+            >
               <Icon name="plus" size={14} />
-              {t('新建会话')}
+              <span className="ai-new-session-label">{t('新建会话')}</span>
             </button>
             <div className="ai-session-list">
               {sessions.map(session => (
@@ -860,7 +893,7 @@ export default function AiChatPanel({ account }: AiChatPanelProps) {
                 <textarea
                   className="ai-input"
                   rows={2}
-                  placeholder={t('输入消息，Enter 发送，Shift+Enter 换行')}
+                  placeholder={t(isNarrow ? '输入消息…' : '输入消息，Enter 发送，Shift+Enter 换行')}
                   disabled={streaming}
                   value={draft}
                   onChange={event => setDraft(event.target.value)}

@@ -9,6 +9,7 @@ import {
 } from '../login-status'
 import { useT } from '../i18n/useT'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import '../styles/components/login.css'
 
 export type LoginStatusVisualProps = {
@@ -53,8 +54,8 @@ export default function LoginStatusVisual({
     <>
       {state === 'starting' || state === 'succeeded' || state === 'authenticating'
         ? (
-            <div className="state-icon spinning">
-              <Icon name="refresh" size={30} />
+            <div className="state-icon">
+              <LoadingDots />
             </div>
           )
         : showQr

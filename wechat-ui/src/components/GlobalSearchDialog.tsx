@@ -13,6 +13,7 @@ import type { Contact, Message, Thread } from '../types'
 import { startChatWithContact, startChatWithId } from '../store/actions'
 import { useStore } from '../store/hooks'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-search.css'
 import '../styles/components/global-search.css'
@@ -212,7 +213,7 @@ export default function GlobalSearchDialog({ open, accountId, onClose }: Props) 
             spellCheck="false"
             onChange={event => setQuery(event.target.value)}
           />
-          {loading && <span className="contact-spinner"><Icon name="refresh" size={14} className="spin" /></span>}
+          {loading && <span className="contact-spinner"><LoadingDots /></span>}
         </div>
 
         {error && <p className="contact-error">{t(error)}</p>}

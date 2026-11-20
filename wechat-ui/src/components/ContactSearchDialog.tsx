@@ -12,6 +12,7 @@ import { contactName } from '../format'
 import { useT } from '../i18n/useT'
 import type { Contact, ContactDiscovery, ContactPrivacySettings, Operation } from '../types'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-search.css'
 import '../styles/components/contact-detail.css'
@@ -482,7 +483,7 @@ export default function ContactSearchDialog({
           />
           {loading && (
             <span className="contact-spinner">
-              <Icon name="refresh" size={14} className="spin" />
+              <LoadingDots />
             </span>
           )}
         </div>
@@ -501,7 +502,7 @@ export default function ContactSearchDialog({
             )}
             {discovering && (
               <div className="discovery-status">
-                <Icon name="refresh" size={12} className="spin" />
+                <LoadingDots />
                 {t('正在微信中搜索…')}
               </div>
             )}
@@ -682,7 +683,7 @@ export default function ContactSearchDialog({
               disabled={syncing || loading}
               onClick={() => { void syncContacts() }}
             >
-              <Icon name="refresh" size={13} className={syncing ? 'spin' : undefined} />
+              {syncing ? <LoadingDots /> : <Icon name="refresh" size={13} />}
               <span>{t('同步通讯录')}</span>
             </button>
             {syncStatus && <span className={syncStatusClass}>{t(syncStatus)}</span>}

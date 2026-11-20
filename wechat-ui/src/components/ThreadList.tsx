@@ -20,6 +20,7 @@ import { useStore } from '../store/hooks'
 import { registerThreadListView } from '../store/viewRefs'
 import type { Thread, ThreadFilter } from '../types'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/thread-list.css'
 
@@ -253,7 +254,7 @@ export default function ThreadList() {
               disabled={loading}
               onClick={() => void loadThreads()}
             >
-              <Icon name="refresh" size={16} className={loading ? 'spin' : undefined} />
+              {loading ? <LoadingDots /> : <Icon name="refresh" size={16} />}
             </button>
           </div>
         </div>

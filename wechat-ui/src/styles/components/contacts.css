@@ -1,7 +1,7 @@
 /*
- * Contacts sidebar: header actions, search field, directory groups with their
- * collapse state, the pending "new friends" section and its detail dialog.
- * Ported from the Vue scoped style block with identical selectors and values.
+ * Contacts sidebar: header actions, search field and the directory groups with
+ * their collapse state. The request inbox reuses the request rows and detail
+ * dialog styles declared at the end of this file.
  */
 
 .contacts-panel {
@@ -303,28 +303,6 @@
   opacity: 1;
 }
 
-.friend-requests {
-  margin: 2px 2px 10px;
-  padding: 6px 0 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.friend-requests-title {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0 6px 6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.friend-requests-count {
-  color: var(--danger);
-  font-variant-numeric: tabular-nums;
-}
-
 .request-row {
   display: flex;
   align-items: center;
@@ -355,32 +333,6 @@
   white-space: nowrap;
   color: var(--muted);
   font-size: 11px;
-}
-
-.request-open {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 10px;
-}
-
-.request-open:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.request-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .request-accept {

@@ -20,6 +20,7 @@ import { useStore } from '../store/hooks'
 import { registerMessageListView } from '../store/viewRefs'
 import type { LocalMessage } from '../types'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import MessageBubble from './MessageBubble'
 import '../styles/components/messages.css'
 
@@ -212,7 +213,7 @@ export default function MessageList() {
                   disabled={olderLoading}
                   onClick={() => void loadOlderMessages()}
                 >
-                  <Icon name="refresh" size={13} className={olderLoading ? 'spin' : undefined} />
+                  {olderLoading ? <LoadingDots /> : <Icon name="refresh" size={13} />}
                   {olderLoading ? t('加载中') : t('加载更早消息')}
                 </button>
               )

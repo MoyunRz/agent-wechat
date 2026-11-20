@@ -12,6 +12,7 @@ import { useT } from '../i18n/useT'
 import type { Contact, ContactPrivacySettings } from '../types'
 import { useStore } from '../store/hooks'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-detail.css'
 
@@ -63,6 +64,8 @@ function samePrivacy(left: ContactPrivacySettings | null | undefined, right: Con
 export default function ContactDetailCard({ contactId, onClose, onChanged }: Props) {
   const t = useT()
   const accountId = useStore(state => state.session.account?.id ?? '')
+  const ownUsername = useStore(state => state.session.account?.ownUsername ?? '')
+  const isSelf = Boolean(ownUsername && contactId === ownUsername)
 
   const [profile, setProfile] = useState<Contact | null>(null)
   const [loading, setLoading] = useState(true)
@@ -369,8 +372,15 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
           </div>
         )}
 
+        {isSelf && (
+          <p className="contact-card-hint">{t('这是你自己的账号，不能在这里修改资料。')}</p>
+        )}
+        {!isSelf && profile && !profile.privacyVersion && !profile.privacyUnavailable && profile.localType == null && (
+          <p className="contact-card-hint">{t('该联系人不是普通好友，或资料尚未同步，暂时不能修改备注和关系隐私。')}</p>
+        )}
+
         {loading && !profile
-          ? <div className="contact-card-loading"><Icon name="refresh" size={13} className="spin" />{t('正在读取联系人资料…')}</div>
+          ? <div className="contact-card-loading"><LoadingDots />{t('正在读取联系人资料…')}</div>
           : profile
             ? (
               <>
@@ -476,31 +486,33 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
                   <div className={`contact-card-status${statusFailed ? ' error' : ''}`}>{t(status)}</div>
                 )}
 
-                <div className="contact-danger">
-                  {confirmRemove
-                    ? (
-                      <>
-                        <p>{t('将此人从你的联系人中删除。聊天记录会保留。')}</p>
-                        <div className="contact-danger-actions">
-                          <button type="button" onClick={() => setConfirmRemove(false)}>{t('取消')}</button>
-                          <button type="button" className="danger" onClick={() => void removeContact()}>
-                            {t('删除联系人')}
-                          </button>
-                        </div>
-                      </>
-                    )
-                    : (
-                      <button
-                        type="button"
-                        className="contact-remove"
-                        disabled={removed}
-                        onClick={() => setConfirmRemove(true)}
-                      >
-                        <Icon name="trash" size={13} />
-                        {t('删除联系人')}
-                      </button>
-                    )}
-                </div>
+                {!isSelf && (
+                  <div className="contact-danger">
+                    {confirmRemove
+                      ? (
+                        <>
+                          <p>{t('将此人从你的联系人中删除。聊天记录会保留。')}</p>
+                          <div className="contact-danger-actions">
+                            <button type="button" onClick={() => setConfirmRemove(false)}>{t('取消')}</button>
+                            <button type="button" className="danger" onClick={() => void removeContact()}>
+                              {t('删除联系人')}
+                            </button>
+                          </div>
+                        </>
+                      )
+                      : (
+                        <button
+                          type="button"
+                          className="contact-remove"
+                          disabled={removed}
+                          onClick={() => setConfirmRemove(true)}
+                        >
+                          <Icon name="trash" size={13} />
+                          {t('删除联系人')}
+                        </button>
+                      )}
+                  </div>
+                )}
               </>
             )
             : null}

@@ -48,6 +48,15 @@
   font-size: 11px;
 }
 
+/* Explains why an identity cannot be edited here (your own account or a row
+   that is not an ordinary friend yet). */
+.contact-card-hint {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .contact-card-rows {
   display: flex;
   flex-direction: column;

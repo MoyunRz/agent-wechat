@@ -17,6 +17,7 @@ import type {
   Thread,
 } from '../types'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import VoiceBubble from './VoiceBubble'
 import '../styles/components/messages.css'
@@ -672,7 +673,7 @@ export default function MessageBubble({
                 : isImageLoading
                   ? (
                     <span className="image-loading-box">
-                      <span className="image-spinner" />
+                      <LoadingDots />
                     </span>
                   )
                   : (
@@ -745,7 +746,7 @@ export default function MessageBubble({
                               : isImageLoading
                                 ? (
                                   <span className="image-loading-box">
-                                    <span className="image-spinner" />
+                                    <LoadingDots />
                                   </span>
                                 )
                                 : (

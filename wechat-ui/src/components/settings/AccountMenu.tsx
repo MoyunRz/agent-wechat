@@ -5,6 +5,7 @@ import type { AccountSummary } from '../../types'
 import { connectionLabel } from '../../format'
 import { useT } from '../../i18n/useT'
 import Icon from '../Icon'
+import LoadingDots from '../LoadingDots'
 import ThreadAvatar from '../ThreadAvatar'
 import type { PresencePhase } from './usePresence'
 
@@ -19,6 +20,8 @@ export type AccountMenuProps = {
   onClose: () => void
   onRefresh: () => void
   onLogout: () => void
+  /** Phones have no settings button in the bottom bar; this opens the panel. */
+  onSettings?: () => void
 }
 
 export default function AccountMenu({
@@ -31,6 +34,7 @@ export default function AccountMenu({
   onClose,
   onRefresh,
   onLogout,
+  onSettings,
 }: AccountMenuProps) {
   const t = useT()
 
@@ -77,13 +81,19 @@ export default function AccountMenu({
       </div>
 
       <div className="popover-actions">
+        {onSettings && (
+          <button type="button" className="popover-action" onClick={onSettings}>
+            <Icon name="settings" size={14} />
+            {t('界面设置')}
+          </button>
+        )}
         <button
           type="button"
           className="popover-action"
           disabled={accountRefreshing || loggingOut}
           onClick={onRefresh}
         >
-          <Icon name="refresh" size={14} className={accountRefreshing ? 'spin' : undefined} />
+          {accountRefreshing ? <LoadingDots /> : <Icon name="refresh" size={14} />}
           {t('刷新账号状态')}
         </button>
         <button
@@ -92,7 +102,7 @@ export default function AccountMenu({
           disabled={loggingOut}
           onClick={onLogout}
         >
-          <Icon name="logout" size={14} className={loggingOut ? 'spin' : undefined} />
+          {loggingOut ? <LoadingDots /> : <Icon name="logout" size={14} />}
           {t('退出登录')}
         </button>
       </div>

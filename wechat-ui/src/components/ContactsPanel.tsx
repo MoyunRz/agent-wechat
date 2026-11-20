@@ -1,17 +1,16 @@
 // Contacts sidebar: the directory grouped by category, a local search over the
-// loaded directory, the manual contact-sync job and the pending "new friends"
-// requests. The Vue component received the account and a preloaded directory
-// through props; here the directory lives in the threads slice, so the shell
-// renders this component without props.
+// loaded directory and the manual contact-sync job. Friend requests live in
+// their own inbox view. The Vue component received the account and a preloaded
+// directory through props; here the directory lives in the threads slice, so the
+// shell renders this component without props.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { wechatApi, WechatApiError } from '../api'
-import { formatRequestTime, requestName, requestStatus } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
-import type { Contact, ContactPrivacySettings, ContactRequest, Operation } from '../types'
+import type { Contact, Operation } from '../types'
 import {
   loadContactDirectory,
   openContactEditor,
@@ -22,17 +21,14 @@ import {
 } from '../store/actions'
 import { useStore } from '../store/hooks'
 import { registerContactsPanelView } from '../store/viewRefs'
-import ContactPrivacyFields, { defaultContactPrivacy } from './ContactPrivacyFields'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contacts.css'
 
 const SYNC_POLL_INTERVAL = 1500
 const SYNC_POLL_LIMIT = 80
 const SYNC_STATUS_CLEAR_DELAY = 2500
-// The pending "new friends" list is refreshed from the local profile while the
-// panel is open, as the Vue component did.
-const FRIEND_REQUEST_POLL_INTERVAL = 20_000
 
 // The upstream contact database also holds group members, official accounts and
 // WeCom entries; these categories are never shown as personal contacts.
@@ -155,6 +151,7 @@ export default function ContactsPanel() {
   const contactNames = useStore(state => state.threads.contactNames)
   const businessUsernames = useStore(selectBusinessUsernames)
   const accountId = useStore(state => state.session.account?.id ?? '')
+  const ownUsername = useStore(state => state.session.account?.ownUsername ?? '')
   const authenticated = useStore(state => state.session.account?.authenticated ?? false)
 
   const [query, setQuery] = useState('')
@@ -163,11 +160,6 @@ export default function ContactsPanel() {
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
   const [syncFailed, setSyncFailed] = useState(false)
-  const [friendRequests, setFriendRequests] = useState<ContactRequest[]>([])
-  const [accepting, setAccepting] = useState<Record<string, boolean>>({})
-  const [requestError, setRequestError] = useState('')
-  const [detailRequest, setDetailRequest] = useState<ContactRequest | null>(null)
-  const [requestPrivacy, setRequestPrivacy] = useState<ContactPrivacySettings>(defaultContactPrivacy)
   // Contact folds open by default; the other categories start collapsed, as in
   // the Linux client.
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -179,14 +171,12 @@ export default function ContactsPanel() {
   })
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const friendRequestTimerRef = useRef<number | null>(null)
   const syncClearTimerRef = useRef<number | null>(null)
   const directoryTokenRef = useRef(0)
   const syncTokenRef = useRef(0)
   const loadingRef = useRef(true)
   const syncingRef = useRef(false)
   const syncStatusRef = useRef('')
-  const acceptingRef = useRef<Record<string, boolean>>({})
   const accountIdRef = useRef(accountId)
 
   // Latest-value mirrors for callbacks that run after their render.
@@ -207,12 +197,6 @@ export default function ContactsPanel() {
     setSyncStatus(value)
   }
 
-  function patchAccepting(id: string, value: boolean): void {
-    const next = { ...acceptingRef.current, [id]: value }
-    acceptingRef.current = next
-    setAccepting(next)
-  }
-
   /** Loads the shared directory; failures leave directoryReady false and the
    *  banner below reports them. */
   const loadDirectory = useCallback(async (force = false): Promise<void> => {
@@ -231,22 +215,6 @@ export default function ContactsPanel() {
     }
   }, [])
 
-  /** Reads incoming request conversations from the daemon's canonical rows.
-   *  A hub without the route leaves the section empty. */
-  const loadFriendRequests = useCallback(async (): Promise<void> => {
-    const account = accountIdRef.current
-    if (!account)
-      return
-    try {
-      const page = await wechatApi.listContactRequests(account, { direction: 'incoming', limit: 50 })
-      setFriendRequests(page.items ?? [])
-      setRequestError('')
-    }
-    catch {
-      setFriendRequests([])
-    }
-  }, [])
-
   useEffect(() => {
     // The view registry alias writes the same field the action layer reads.
     registerContactsPanelView({
@@ -257,15 +225,7 @@ export default function ContactsPanel() {
 
   useEffect(() => {
     void loadDirectory()
-    void loadFriendRequests()
-    friendRequestTimerRef.current = window.setInterval(() => {
-      void loadFriendRequests()
-    }, FRIEND_REQUEST_POLL_INTERVAL)
     return () => {
-      if (friendRequestTimerRef.current !== null) {
-        window.clearInterval(friendRequestTimerRef.current)
-        friendRequestTimerRef.current = null
-      }
       if (syncClearTimerRef.current !== null) {
         window.clearTimeout(syncClearTimerRef.current)
         syncClearTimerRef.current = null
@@ -273,7 +233,7 @@ export default function ContactsPanel() {
       directoryTokenRef.current += 1
       syncTokenRef.current += 1
     }
-  }, [loadDirectory, loadFriendRequests])
+  }, [loadDirectory])
 
   // The directory action reports a failure only by leaving the flag unset, so
   // the banner follows the settled loading state instead of an exception.
@@ -398,52 +358,6 @@ export default function ContactsPanel() {
     return rows
   }, [normalizedQuery, searchResults, contactGroups, expandedGroups])
 
-  function openDetail(item: ContactRequest): void {
-    setRequestError('')
-    setRequestPrivacy(defaultContactPrivacy())
-    setDetailRequest(item)
-  }
-
-  function closeDetail(): void {
-    setDetailRequest(null)
-  }
-
-  function acceptDisabled(item: ContactRequest): boolean {
-    return acceptingRef.current[item.id] === true || !item.actionable
-  }
-
-  /** Accepts the inspected request version through the verified contact-request
-   *  path, or deletes the local conversation when the owner ignores it. */
-  async function actOnRequest(item: ContactRequest, action: 'accept' | 'delete'): Promise<void> {
-    const account = accountIdRef.current
-    if (!account || acceptingRef.current[item.id])
-      return
-    patchAccepting(item.id, true)
-    setRequestError('')
-    const failing = action === 'accept' ? '通过好友申请失败，请稍后重试。' : '删除申请记录失败，请稍后重试。'
-    try {
-      let operation = action === 'accept'
-        ? await wechatApi.acceptContactRequest(account, item.id, item.version, requestPrivacy)
-        : await wechatApi.deleteContactRequest(account, item.id, item.version)
-      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
-        await sleep(SYNC_POLL_INTERVAL)
-        operation = await wechatApi.getOperation(account, operation.id)
-      }
-      if (!isTerminalState(operation.state))
-        throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
-      if (operation.state !== 'succeeded')
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
-      setDetailRequest(null)
-      await Promise.all([loadDirectory(true), loadFriendRequests()])
-    }
-    catch (value) {
-      setRequestError(userFacingErrorMessage(value, failing))
-    }
-    finally {
-      patchAccepting(item.id, false)
-    }
-  }
-
   async function syncContacts(): Promise<void> {
     const account = accountIdRef.current
     if (!account || syncingRef.current || loadingRef.current)
@@ -473,7 +387,6 @@ export default function ContactsPanel() {
         return
       }
       await loadDirectory(true)
-      void loadFriendRequests()
       updateSyncStatus('通讯录同步完成')
       syncClearTimerRef.current = window.setTimeout(() => {
         syncClearTimerRef.current = null
@@ -519,7 +432,10 @@ export default function ContactsPanel() {
   /** Friends can edit their remark and relationship privacy in the card. */
   function canEditContact(contact: Contact): boolean {
     const peer = (contact.username || contact.id).trim()
-    return Boolean(peer) && !peer.startsWith('gh_') && !peer.endsWith('@openim')
+    return Boolean(peer)
+      && peer !== ownUsername
+      && !peer.startsWith('gh_')
+      && !peer.endsWith('@openim')
   }
 
   function openContactDetails(contact: Contact): void {
@@ -549,7 +465,7 @@ export default function ContactsPanel() {
               disabled={syncing || loading}
               onClick={() => void syncContacts()}
             >
-              <Icon name="refresh" size={16} className={syncing ? 'spin' : undefined} />
+              {syncing ? <LoadingDots /> : <Icon name="refresh" size={16} />}
             </button>
           </div>
         </div>
@@ -588,46 +504,6 @@ export default function ContactsPanel() {
         : null}
 
       <div className="contacts-scroll scrollbar-thin">
-        {friendRequests.length > 0 && (
-          <section className="friend-requests">
-            <h3 className="friend-requests-title">
-              {t('新的朋友')}
-              <span className="friend-requests-count">{friendRequests.length}</span>
-            </h3>
-            {requestError && <div className="contacts-status error">{t(requestError)}</div>}
-            {friendRequests.map(item => (
-              <div key={item.id} className="request-row">
-                <button
-                  type="button"
-                  className="request-open"
-                  title={t('查看申请详情')}
-                  onClick={() => openDetail(item)}
-                >
-                  <ThreadAvatar
-                    accountId={accountId}
-                    name={requestName(item)}
-                    username={item.peerId}
-                    size={40}
-                  />
-                  <span className="request-main">
-                    <span className="request-name">{requestName(item)}</span>
-                    <span className="request-sub">{t(item.message || '请求添加你为朋友')}</span>
-                  </span>
-                </button>
-                <span className="request-actions">
-                  <button
-                    type="button"
-                    className="request-accept"
-                    onClick={() => openDetail(item)}
-                  >
-                    {t(item.actionable ? '查看' : requestStatus(item))}
-                  </button>
-                </span>
-              </div>
-            ))}
-          </section>
-        )}
-
         {loading && directoryContacts.length === 0
           ? (
             <div className="contacts-skeletons">
@@ -711,7 +587,7 @@ export default function ContactsPanel() {
                     disabled={syncing}
                     onClick={() => void syncContacts()}
                   >
-                    <Icon name="refresh" size={14} className={syncing ? 'spin' : undefined} />
+                    {syncing ? <LoadingDots /> : <Icon name="refresh" size={14} />}
                     {t(syncing ? '同步中' : '同步通讯录')}
                   </button>
                 )}
@@ -726,75 +602,6 @@ export default function ContactsPanel() {
             {t('用「{query}」开始聊天', { query: normalizedQuery })}
           </button>
         </footer>
-      )}
-
-      {detailRequest && (
-        <div
-          className="request-overlay"
-          onClick={(event) => {
-            if (event.target === event.currentTarget)
-              closeDetail()
-          }}
-        >
-          <div className="request-detail" role="dialog" aria-modal="true">
-            <button type="button" className="detail-close" title={t('关闭')} onClick={closeDetail}>
-              <Icon name="close" size={14} />
-            </button>
-            <div className="detail-head">
-              <ThreadAvatar
-                accountId={accountId}
-                name={requestName(detailRequest)}
-                username={detailRequest.peerId}
-                size={72}
-              />
-              <div className="detail-id">
-                <span className="detail-name">{requestName(detailRequest)}</span>
-                <span className="detail-source">{detailRequest.peerId}</span>
-              </div>
-            </div>
-            <div className="detail-body">
-              {detailRequest.message && (
-                <div className="detail-greeting">
-                  <span className="detail-label">{t('申请消息')}</span>
-                  <p>{detailRequest.message}</p>
-                </div>
-              )}
-              <div className="detail-meta">
-                <span className="detail-label">{t('申请时间')}</span>
-                <span>{t(formatRequestTime(detailRequest.updatedAt))}</span>
-              </div>
-              <div className={`detail-status ${detailRequest.actionable ? 'ready' : 'blocked'}`}>
-                {t(requestStatus(detailRequest))}
-              </div>
-              <ContactPrivacyFields
-                value={requestPrivacy}
-                onChange={setRequestPrivacy}
-                disabled={accepting[detailRequest.id] === true || !detailRequest.actionable}
-                hint="通过前选择你愿意共享的内容。"
-              />
-              {requestError && <div className="detail-status blocked">{t(requestError)}</div>}
-            </div>
-            <div className="detail-actions">
-              <button
-                type="button"
-                className="detail-decline"
-                disabled={accepting[detailRequest.id] === true}
-                title={t('只删除本地申请记录，不会通知对方')}
-                onClick={() => void actOnRequest(detailRequest, 'delete')}
-              >
-                {t(accepting[detailRequest.id] ? '处理中' : '删除')}
-              </button>
-              <button
-                type="button"
-                className="request-accept"
-                disabled={acceptDisabled(detailRequest)}
-                onClick={() => void actOnRequest(detailRequest, 'accept')}
-              >
-                {t(accepting[detailRequest.id] ? '处理中' : '同意')}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </aside>
   )

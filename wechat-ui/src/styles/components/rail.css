@@ -107,6 +107,17 @@
   transition: transform 0.16s ease;
 }
 
+.rail-avatar-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+/* Desktop has no labels under the rail icons; the phone tab bar shows them. */
+.rail-label {
+  display: none;
+}
+
 .rail-avatar-button:hover {
   transform: translateY(-1px);
 }
@@ -307,4 +318,125 @@
 .rail-popover[data-phase='leave'] {
   opacity: 0;
   transform: translateY(4px);
+}
+
+/* Phone: the rail becomes an iOS-style tab bar; AI floats above it. */
+@media (max-width: 768px) {
+  .app-shell.is-narrow .app-rail {
+    flex: 0 0 auto;
+    width: 100%;
+    height: calc(50px + env(safe-area-inset-bottom));
+    /* Keep the tab bar on the bottom edge even while a view is still loading
+       and no other flex child occupies space. */
+    margin-top: auto;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    padding: 0 6px env(safe-area-inset-bottom);
+    border-right: 0;
+    border-top: 0.5px solid var(--border);
+    background: transparent;
+  }
+
+  /* The translucent bar is drawn by a pseudo-element: backdrop-filter on the
+     rail itself would make it the containing block of its fixed descendants,
+     pinning the popover backdrop and the settings modal to the 50px bar
+     instead of the viewport. */
+  .app-shell.is-narrow .app-rail::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: color-mix(in srgb, var(--popover-bg) 86%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    pointer-events: none;
+  }
+
+  .app-shell.is-narrow .rail-avatar-button {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 5px 0 3px;
+    border-radius: 0;
+    color: var(--muted);
+  }
+
+  .app-shell.is-narrow .rail-avatar-button:hover {
+    transform: none;
+  }
+
+  .app-shell.is-narrow .rail-avatar-button.active {
+    color: var(--accent);
+    box-shadow: none;
+  }
+
+  .app-shell.is-narrow .rail-status {
+    display: none;
+  }
+
+  .app-shell.is-narrow .rail-nav {
+    flex: 4;
+    flex-direction: row;
+    justify-content: space-around;
+    gap: 0;
+  }
+
+  .app-shell.is-narrow .rail-button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: auto;
+    height: auto;
+    padding: 5px 0 3px;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .app-shell.is-narrow .rail-button:hover:not(:disabled),
+  .app-shell.is-narrow .rail-button.active {
+    background: transparent;
+    box-shadow: none;
+    color: var(--accent);
+  }
+
+  .app-shell.is-narrow .rail-button.active::before {
+    display: none;
+  }
+
+  .app-shell.is-narrow .rail-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .app-shell.is-narrow .rail-badge {
+    top: 1px;
+    right: 12px;
+  }
+
+  .app-shell.is-narrow .rail-bottom {
+    display: none;
+  }
+
+  /* Popovers open above the bottom bar instead of beside the old rail. */
+  .app-shell.is-narrow .account-popover,
+  .app-shell.is-narrow .settings-popover {
+    top: auto;
+    bottom: calc(100% + 8px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
 }

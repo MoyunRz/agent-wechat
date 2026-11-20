@@ -35,6 +35,7 @@ export default function AppRail() {
   const account = useStore(state => state.session.account)
   const selfName = useStore(state => state.session.selfName)
   const view = useStore(state => state.ui.railView)
+  const isNarrow = useStore(state => state.threads.isNarrow)
   const unreadTotal = useStore(selectUnreadTotal)
   const friendRequestCount = useStore(state => state.session.friendRequestCount)
   const accountRefreshing = useStore(state => state.session.manualRefreshing)
@@ -87,23 +88,28 @@ export default function AppRail() {
         title={t('账号信息')}
         onClick={toggleAccountMenu}
       >
-        <ThreadAvatar
-          accountId={account.id}
-          name={accountLabel}
-          username={account.ownUsername}
-          size={38}
-        />
-        <span className="rail-status" data-tone={tone} />
+        <span className="rail-avatar-wrap">
+          <ThreadAvatar
+            accountId={account.id}
+            name={accountLabel}
+            username={account.ownUsername}
+            size={isNarrow ? 26 : 38}
+          />
+          <span className="rail-status" data-tone={tone} />
+        </span>
+        <span className="rail-label">{t('我')}</span>
       </button>
 
       <div className="rail-nav">
         <button
           type="button"
+          data-view="chats"
           className={`rail-button${view === 'chats' ? ' active' : ''}`}
           title={t('聊天')}
           onClick={() => setRailView('chats')}
         >
           <Icon name="message" size={24} />
+          <span className="rail-label">{t('聊天')}</span>
           {/* The count badge disappears once the view is open: it is a hint of
               new content, not a duplicate of the unread dots in the list. */}
           {unreadTotal > 0 && view !== 'chats' && (
@@ -112,30 +118,36 @@ export default function AppRail() {
         </button>
         <button
           type="button"
+          data-view="contacts"
           className={`rail-button${view === 'contacts' ? ' active' : ''}`}
           title={t('通讯录')}
           onClick={() => setRailView('contacts')}
         >
           <Icon name="contacts" size={24} />
+          <span className="rail-label">{t('通讯录')}</span>
         </button>
         <button
           type="button"
+          data-view="requests"
           className={`rail-button${view === 'requests' ? ' active' : ''}`}
           title={t('好友申请')}
           onClick={() => setRailView('requests')}
         >
           <Icon name="users" size={22} />
+          <span className="rail-label">{t('好友申请')}</span>
           {friendRequestCount > 0 && view !== 'requests' && (
             <span className="rail-badge">{badgeText(friendRequestCount)}</span>
           )}
         </button>
         <button
           type="button"
+          data-view="ai"
           className={`rail-button${view === 'ai' ? ' active' : ''}`}
           title={t('AI 对话')}
           onClick={() => setRailView('ai')}
         >
           <Icon name="gpt" size={20} />
+          <span className="rail-label">{t('AI 对话')}</span>
         </button>
       </div>
 
@@ -165,6 +177,12 @@ export default function AppRail() {
           onClose={() => setAccountMenuOpen(false)}
           onRefresh={handleRefresh}
           onLogout={handleLogout}
+          onSettings={isNarrow
+            ? () => {
+                setAccountMenuOpen(false)
+                setSettingsOpenAction(true)
+              }
+            : undefined}
         />
       )}
 

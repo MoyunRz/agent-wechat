@@ -153,16 +153,6 @@ a {
   background: transparent;
 }
 
-.spin {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .fade-in {
   animation: fade-in 0.22s ease both;
 }

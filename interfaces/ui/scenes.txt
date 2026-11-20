@@ -5,6 +5,8 @@
 scene account-menu | route /{server}/{account}/chats, viewports desktop | The account popover at the top of the rail, with its connection rows and sign-out.
 scene add-contact | route /{server}/{account}/new-chat, viewports desktop+narrow | Server discovery and the greeting and privacy choices shown before a friend request is sent.
 scene ai-chat | route /{server}/{account}/chats, viewports desktop+narrow | The AI chat panel, opened from the rail, with no service configured yet.
+scene ai-sessions | route /{server}/{account}/chats, viewports narrow | The AI session list on a phone, with the new-conversation button and the archived section.
+scene ai-settings | route /{server}/{account}/chats, viewports narrow | The AI service settings dialog on a phone, with its model and reasoning selects.
 scene chat-filters | route /{server}/{account}/chats, viewports desktop+compact | The conversation filter tabs, the collapsed service categories and their unread badges.
 scene chat-info | route /{server}/{account}/chats/{thread}/info, viewports desktop+narrow | Details of a group conversation with its cached members and conversation flags.
 scene chat-list | route /{server}/{account}/chats, viewports desktop+narrow | The inbox with its filter tabs and unread badges, and the welcome pane beside it.
@@ -25,3 +27,4 @@ scene new-chat | route /{server}/{account}/new-chat, viewports desktop | The dia
 scene omni-search | route /{server}/{account}/chats, viewports desktop | The ⌘K search dialog with contacts, groups and matching messages in separate sections.
 scene quoted-replies | route /{server}/{account}/chats/{thread}, viewports desktop+narrow | Quoted replies show the author name supplied with the quote above the quoted excerpt.
 scene settings | route /{server}/{account}/settings, viewports desktop+narrow | The settings popover that opens from its button in the rail.
+scene settings-category | route /{server}/{account}/settings, viewports narrow | A settings category opened from the directory on a phone, covering the tab bar.

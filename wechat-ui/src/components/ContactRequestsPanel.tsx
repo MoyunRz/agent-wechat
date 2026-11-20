@@ -21,6 +21,7 @@ import {
 import { useStore } from '../store/hooks'
 import ContactPrivacyFields, { defaultContactPrivacy } from './ContactPrivacyFields'
 import Icon from './Icon'
+import LoadingDots from './LoadingDots'
 import ThreadAvatar from './ThreadAvatar'
 import '../styles/components/contact-requests.css'
 
@@ -203,7 +204,7 @@ export default function ContactRequestsPanel() {
               disabled={loading}
               onClick={() => { void fetchPage(null, false) }}
             >
-              <Icon name="refresh" size={16} className={loading ? 'spin' : undefined} />
+              {loading ? <LoadingDots /> : <Icon name="refresh" size={16} />}
             </button>
           </div>
         </div>
@@ -290,7 +291,7 @@ export default function ContactRequestsPanel() {
             disabled={moreLoading}
             onClick={() => { void fetchPage(cursor, true) }}
           >
-            {moreLoading && <Icon name="refresh" size={13} className="spin" />}
+            {moreLoading && <LoadingDots />}
             {t(moreLoading ? '加载中…' : '加载更多')}
           </button>
         )}

@@ -62,5 +62,6 @@
   "默认": "Default",
   "默认（不发送）": "Default (do not send)",
   "（已停止）": "(stopped)",
-  "（已配置，留空保持不变）": "(configured; leave blank to keep)"
+  "（已配置，留空保持不变）": "(configured; leave blank to keep)",
+  "输入消息…": "Type a message…"
 }

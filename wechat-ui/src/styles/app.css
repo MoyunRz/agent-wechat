@@ -647,6 +647,19 @@
 @media (max-width: 768px) {
   .app-shell.is-narrow {
     height: 100dvh;
+    flex-direction: column;
+  }
+
+  /* 底部导航：列表/会话占满上方空间，导航条排在最后。 */
+  .app-shell.is-narrow .thread-sidebar,
+  .app-shell.is-narrow .contacts-panel,
+  .app-shell.is-narrow .chat-pane,
+  .app-shell.is-narrow .ai-page {
+    order: 1;
+  }
+
+  .app-shell.is-narrow .app-rail {
+    order: 2;
   }
 
   .back-button {
@@ -660,6 +673,27 @@
   .app-shell.is-narrow.chat-open .thread-sidebar,
   .app-shell.is-narrow.chat-open .contacts-panel {
     display: none;
+  }
+
+  /* AI 会话列表和聊天、通讯录一样保留底部导航；只有打开具体会话时
+     才占满屏幕，用头部的返回按钮回到列表。 */
+  .app-shell.is-narrow.ai-open:has(.ai-page.is-mobile-chat) .app-rail {
+    display: none;
+  }
+
+  /* 手机上的列表页（会话、通讯录、好友申请）铺满导航条上方的剩余空间。 */
+  .app-shell.is-narrow .contacts-panel,
+  .app-shell.is-narrow .thread-sidebar {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    border-right: 0;
+  }
+
+  .app-shell.is-narrow .contacts-panel .contacts-title h2 {
+    font-size: 19px;
   }
 
   .app-shell.is-narrow:not(.chat-open) .chat-pane {

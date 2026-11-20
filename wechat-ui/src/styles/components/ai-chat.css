@@ -773,6 +773,18 @@
   font-size: 13px;
 }
 
+/* The native arrow sits hard against the right edge; inset it like the other
+   icon buttons in the panel and keep the label clear of it. */
+.ai-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+}
+
 .ai-model-tags {
   display: flex;
   flex-wrap: wrap;
@@ -863,69 +875,173 @@
 
 @media (max-width: 768px) {
   .ai-head {
-    padding-left: 14px;
-    padding-right: 14px;
+    height: 56px;
+    padding: 0 12px;
+    gap: 8px;
   }
 
-  /* Phone: the session list runs in a row above the chat. */
+  .ai-heading {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ai-heading h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+  }
+
+  .ai-sub {
+    margin-top: 1px;
+    font-size: 11px;
+  }
+
+  .ai-head-actions {
+    gap: 6px;
+  }
+
+  .ai-ghost {
+    padding: 5px 9px;
+    font-size: 11.5px;
+  }
+
+  .ai-icon-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+
+  /* Phone: master/detail, like the chat view: the session list is one screen
+     and the open conversation is another. */
   .ai-body {
     flex-direction: column;
   }
 
-  .ai-sidebar {
-    flex: 0 0 auto;
-    flex-direction: row;
-    align-items: center;
+  .ai-page.is-mobile-list .ai-main {
+    display: none;
+  }
+
+  .ai-page.is-mobile-chat .ai-sidebar {
+    display: none;
+  }
+
+  .ai-page.is-mobile-list .ai-sidebar {
+    flex: 1;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    min-height: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 10px 14px;
+    border-bottom: 0;
+    padding: 12px;
   }
 
-  .ai-new-session {
-    flex: 0 0 auto;
-    height: 32px;
-    padding: 0 12px;
+  .ai-page.is-mobile-list .ai-new-session {
+    width: 100%;
+    height: 40px;
+    justify-content: center;
+    border-radius: 12px;
+    font-size: 13.5px;
   }
 
-  .ai-session-list {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 6px;
+  .ai-page.is-mobile-list .ai-session-list {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    gap: 4px;
+    padding-bottom: 0;
   }
 
-  .ai-session-item {
-    flex: 0 0 auto;
-    max-width: 160px;
-    padding: 6px 10px;
-  }
-
-  /* Phone: there is no hover, so the actions stay visible. */
-  .ai-session-actions,
-  .ai-archived-item .ai-session-action {
-    opacity: 1;
+  .ai-page.is-mobile-list .ai-session-item {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 10px 44px 10px 12px;
+    border-color: transparent;
   }
 
   .ai-session-action {
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
   }
 
-  .ai-session-item {
-    padding-right: 46px;
+  /* Phone: only the open session shows its actions, so a stray tap cannot
+     archive or delete another conversation. */
+  .ai-session-actions {
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+  }
+
+  .ai-page.is-mobile-list .ai-session-item.active .ai-session-actions {
+    opacity: 1;
+  }
+
+  .ai-page.is-mobile-list .ai-archived {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  .ai-page.is-mobile-list .ai-archived-list {
+    max-height: 32dvh;
+    overflow-y: auto;
+  }
+
+  /* Phone: archived rows have no hover, so their restore/delete actions stay
+     visible. */
+  .ai-page.is-mobile-list .ai-archived-item .ai-session-action {
+    opacity: 1;
   }
 
   .ai-list {
-    padding: 14px;
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .ai-empty {
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+
+  .ai-empty-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
   }
 
   .ai-bubble {
-    max-width: 86%;
+    max-width: 88%;
   }
 
   .ai-composer {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .ai-composer-box {
+    padding: 8px 10px;
+    border-radius: 16px;
+  }
+
+  /* Keep 16px so iOS does not zoom the page when the field takes focus. */
+  .ai-input {
+    min-height: 40px;
+    max-height: 140px;
+    font-size: 16px;
+  }
+
+  .ai-model-pill {
+    max-width: 48vw;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .ai-send,
+  .ai-stop {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
   }
 
   /* Phone: the model panel becomes a bottom sheet. */
@@ -937,7 +1053,7 @@
     width: 100%;
     max-height: 65vh;
     border-radius: 16px 16px 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     z-index: 70;
   }
 
