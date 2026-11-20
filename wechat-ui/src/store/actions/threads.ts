@@ -67,9 +67,16 @@ export function selectActiveThreadIsGroup(state: AppState = getState()): boolean
   return Boolean(thread && thread.kind === 'group' && thread.peerId.endsWith('@chatroom'))
 }
 
-/** Official accounts (gh_) only receive: the composer is hidden. */
-export function selectActiveThreadIsOfficial(state: AppState = getState()): boolean {
-  return (selectActiveThread(state)?.peerId ?? '').trim().startsWith('gh_')
+/** System inboxes that never accept a reply from this client. */
+const RECEIVE_ONLY_PEERS = new Set(['fmessage'])
+
+/**
+ * Conversations that only receive messages: official accounts (gh_) and the
+ * friend-recommendation inbox (fmessage). The composer is hidden for them.
+ */
+export function selectActiveThreadReceivesOnly(state: AppState = getState()): boolean {
+  const peerId = (selectActiveThread(state)?.peerId ?? '').trim()
+  return peerId.startsWith('gh_') || RECEIVE_ONLY_PEERS.has(peerId)
 }
 
 /** Peer username shown in the conversation details, when there is one. */

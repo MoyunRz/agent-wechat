@@ -33,7 +33,7 @@ import {
   scheduleAutoRead,
   scheduleThreadRefresh,
   selectActiveThreadIsGroup,
-  selectActiveThreadIsOfficial,
+  selectActiveThreadReceivesOnly,
   selectBusinessUsernames,
   selectContactProfileName,
   selectDetailsPeerId,
@@ -196,11 +196,13 @@ describe('thread selectors', () => {
     expect(selectActiveThreadIsGroup()).toBe(false)
   })
 
-  it('detects official accounts by the gh_ prefix', () => {
+  it('hides the composer for receive-only conversations', () => {
     setThreads({ items: [thread({ peerId: ' gh_abc ' })], activeThreadId: 'thread-1' })
-    expect(selectActiveThreadIsOfficial()).toBe(true)
+    expect(selectActiveThreadReceivesOnly()).toBe(true)
+    setThreads({ items: [thread({ peerId: 'fmessage' })] })
+    expect(selectActiveThreadReceivesOnly()).toBe(true)
     setThreads({ items: [thread({ peerId: 'peer-1' })] })
-    expect(selectActiveThreadIsOfficial()).toBe(false)
+    expect(selectActiveThreadReceivesOnly()).toBe(false)
   })
 
   it('shows a peer id in the details panel only for direct conversations', () => {

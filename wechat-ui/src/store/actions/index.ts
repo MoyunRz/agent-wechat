@@ -138,8 +138,8 @@ export { selectMobileChatOpen } from './threads'
 export { selectUnreadTotal } from './threads'
 /** True when the open conversation is a WeChat group. */
 export { selectActiveThreadIsGroup } from './threads'
-/** True when the open conversation is an official account (gh_). */
-export { selectActiveThreadIsOfficial } from './threads'
+/** True when the open conversation only receives messages (official accounts, fmessage). */
+export { selectActiveThreadReceivesOnly } from './threads'
 /** Peer username shown in the conversation details. */
 export { selectDetailsPeerId } from './threads'
 /** Display name of the peer in the details panel. */

@@ -30,7 +30,7 @@ import {
   refreshAccount,
   refreshActiveMessages,
   selectActiveThread,
-  selectActiveThreadIsOfficial,
+  selectActiveThreadReceivesOnly,
   selectConnectionState,
   selectContactProfileName,
   selectDetailsPeerId,
@@ -102,7 +102,7 @@ export default function App() {
   const lightboxSrc = useStore(state => state.messages.lightboxSrc)
   const unseenBelow = useStore(state => state.messages.unseenBelow)
   const toasts = useStore(state => state.ui.toasts)
-  const activeThreadIsOfficial = useStore(selectActiveThreadIsOfficial)
+  const activeThreadReceivesOnly = useStore(selectActiveThreadReceivesOnly)
   const contactProfile = useStore(state => state.threads.contactProfile)
   const contactProfileLoading = useStore(state => state.threads.contactProfileLoading)
   const contactProfileError = useStore(state => state.threads.contactProfileError)
@@ -624,7 +624,7 @@ export default function App() {
                 </button>
               )}
 
-              {activeThread && !activeThreadIsOfficial && <Composer />}
+              {activeThread && !activeThreadReceivesOnly && <Composer />}
             </main>
           </>
         )}
