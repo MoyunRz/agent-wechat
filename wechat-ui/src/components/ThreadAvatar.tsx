@@ -5,6 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { wechatApi } from '../api'
 import { initials } from '../format'
+import { isTerminalOperation } from '../operations'
 import {
   isWecomPeer,
   specialAvatarBackground,
@@ -25,10 +26,6 @@ const refreshResults = new Map<string, { ok: boolean, at: number }>()
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
-function isTerminal(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 /**
@@ -58,7 +55,7 @@ function ensureAvatarCached(accountId: string, username: string): Promise<boolea
 async function refreshAvatarOnce(accountId: string, username: string): Promise<boolean> {
   try {
     let operation = await wechatApi.refreshAvatar(accountId, username)
-    for (let attempt = 0; attempt < REFRESH_POLL_LIMIT && !isTerminal(operation.state); attempt++) {
+    for (let attempt = 0; attempt < REFRESH_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
       await sleep(REFRESH_POLL_INTERVAL)
       operation = await wechatApi.getOperation(accountId, operation.id)
     }

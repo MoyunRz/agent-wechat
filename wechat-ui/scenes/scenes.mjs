@@ -400,6 +400,43 @@ export const scenes = [
     },
   },
   {
+    name: "friend-request-needs-review",
+    route: "requests",
+    description: "A friend-request accept whose remote outcome is unknown; the UI stops polling and asks the user to refresh.",
+    viewports: ["desktop"],
+    setup: standardWorld,
+    target: () => ({ account: ACCOUNT.id }),
+    prepare: async ({ page }) => {
+      await mockRequests(page);
+      const operation = {
+        accountId: ACCOUNT.id,
+        createdAt: "2026-11-20T00:00:00Z",
+        id: "op-needs-review",
+        kind: "contact_mutation",
+        result: { action: "accept_request", remoteOutcome: "unknown" },
+        state: "needs_review",
+        updatedAt: "2026-11-20T00:00:00Z",
+      };
+      await page.route("**/v1/accounts/*/contact-requests/*/accept", (route) =>
+        route.fulfill({ json: operation }));
+      await page.route("**/v1/accounts/*/operations/op-needs-review", (route) =>
+        route.fulfill({ json: operation }));
+    },
+    ready: async ({ page, expect }) => {
+      await expect(page.locator(".requests-panel .requests-row").filter({ hasText: "Casey Morgan" })).toBeVisible();
+    },
+    actions: async ({ page, expect }) => {
+      await page.locator(".requests-row").filter({ hasText: "Casey Morgan" }).click();
+      const dialog = page.locator(".requests-detail");
+      await dialog.getByRole("button", { name: "Accept", exact: true }).click();
+      await expect(dialog.locator(".detail-status.blocked")).toHaveText(
+        "The operation outcome is unknown. Refresh later to check whether it completed.",
+      );
+      await expect(dialog.getByRole("button", { name: "Accept", exact: true })).toBeEnabled();
+      await expect(dialog.getByRole("button", { name: "Processing…", exact: true })).toHaveCount(0);
+    },
+  },
+  {
     name: "contact-details",
     route: "contacts",
     description: "A saved contact card with remark editing and relationship privacy, opened from the contact list.",

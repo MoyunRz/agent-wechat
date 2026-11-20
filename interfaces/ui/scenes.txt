@@ -17,6 +17,7 @@ scene desktop-hub-connect | route /servers, viewports desktop+narrow | The deskt
 scene desktop-leftover-hub | route /servers, viewports desktop+narrow | The desktop app's first screen when a hub left running by an earlier session holds the local port.
 scene desktop-settings | route /servers, viewports desktop+narrow | Desktop settings, including whether this device's hub keeps running while another hub is used.
 scene direct-chat | route /{server}/{account}/chats/{thread}, viewports desktop+narrow | A direct conversation with text from both sides and a photo.
+scene friend-request-needs-review | route /{server}/{account}/contacts/requests, viewports desktop | A friend-request accept whose remote outcome is unknown; the UI stops polling and asks the user to refresh.
 scene friend-request-review | route /{server}/{account}/contacts/requests, viewports desktop+narrow | One request opened from the inbox, with its greeting, history and accept action.
 scene friend-requests | route /{server}/{account}/contacts/requests, viewports desktop+narrow | The friend-request inbox with received and sent requests and its direction tabs.
 scene group-chat | route /{server}/{account}/chats/{thread}, viewports desktop | A group conversation where each message names its sender, ending in a photo.

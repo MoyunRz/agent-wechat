@@ -8,6 +8,7 @@ import { wechatApi } from '../api'
 import { splitEmoticonSegments } from '../emoticons'
 import { formatClock, isOwnMessage, messageText, messageTypeLabel, threadName } from '../format'
 import { useT } from '../i18n/useT'
+import { isTerminalOperation, operationOutcomeMessage } from '../operations'
 import type {
   AccountSummary,
   LinkCard,
@@ -544,14 +545,14 @@ export default function MessageBubble({
       let operation = action === 'accept'
         ? await wechatApi.acceptContactRequest(account.id, request.id, request.version)
         : await wechatApi.deleteContactRequest(account.id, request.id, request.version)
-      for (let attempt = 0; attempt < 20; attempt++) {
-        if (['succeeded', 'failed', 'cancelled', 'expired'].includes(operation.state))
-          break
+      for (let attempt = 0; attempt < 20 && !isTerminalOperation(operation.state); attempt++) {
         await sleep(1000)
         operation = await wechatApi.getOperation(account.id, operation.id)
       }
       if (operation.state === 'succeeded')
         setFriendRequestLocalStatus(action === 'accept' ? 'accepted' : 'declined')
+      else if (operation.state === 'needs_review')
+        setFriendRequestError(t(operationOutcomeMessage(operation.state)))
       else
         setFriendRequestError(failing)
     }

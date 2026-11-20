@@ -289,6 +289,7 @@ impl crate::upstream::Upstream for BoundUpstream {
     }
     forward!(sync(cursor: &[u8]) -> wechat_protocol::SyncBatch => sync);
     forward!(heartbeat(cursor: &[u8]) -> wechat_protocol::Heartbeat => heartbeat);
+    forward!(contact_rpc_raw(request: &wechat_protocol::ContactRpc) -> Vec<u8> => contact_rpc_raw);
     forward!(group_mutation_raw(request: &wechat_protocol::GroupRpc) -> Vec<u8> => group_mutation_raw);
     forward!(group_detail_raw(room: &str) -> Vec<u8> => group_detail_raw);
     forward!(lookup_room_raw(room: &str, version: u32) -> Vec<u8> => lookup_room_raw);
@@ -558,6 +559,25 @@ mod tests {
             epoch: core.store.runtime(account, "logout-epoch").unwrap(),
             desired: core.store.runtime(account, "desired").unwrap(),
         }
+    }
+
+    #[test]
+    fn bound_upstream_forwards_contact_rpc_validation_to_the_owned_client() {
+        let (_directory, core) = fixture();
+        let upstream = core.account_upstream("one").unwrap();
+        let mut state = core.account_state("one").unwrap();
+        let error = upstream
+            .contact_rpc_raw(
+                &mut state,
+                &wechat_protocol::ContactRpc {
+                    cgi: 0,
+                    path: String::new(),
+                    body: vec![],
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "invalid_contact_rpc");
     }
 
     #[test]

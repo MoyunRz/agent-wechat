@@ -13,6 +13,7 @@ import {
 } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { useT } from '../i18n/useT'
+import { isTerminalOperation, operationOutcomeMessage } from '../operations'
 import type { ContactPrivacySettings, ContactRequest } from '../types'
 import {
   loadContactDirectory,
@@ -41,10 +42,6 @@ const FILTER_LABELS: Record<Filter, string> = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
-function isTerminalState(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 /** Keeps the newest copy of each conversation when a page is appended. */
@@ -140,20 +137,25 @@ export default function ContactRequestsPanel() {
     loadTokenRef.current += 1
   }, [])
 
-  async function openDetail(item: ContactRequest): Promise<void> {
-    setDetail(item)
-    setActionError('')
-    setPrivacy(defaultContactPrivacy())
+  /** Re-reads the opened request so its current actionable state is shown. */
+  async function reloadDetail(id: string): Promise<void> {
     const account = accountIdRef.current
     if (!account)
       return
     try {
-      const fresh = await wechatApi.getContactRequest(account, item.id)
-      setDetail(current => (current?.id === item.id ? fresh : current))
+      const fresh = await wechatApi.getContactRequest(account, id)
+      setDetail(current => (current?.id === id ? fresh : current))
     }
     catch {
       // The list copy is still enough to inspect; a failed read keeps it.
     }
+  }
+
+  async function openDetail(item: ContactRequest): Promise<void> {
+    setDetail(item)
+    setActionError('')
+    setPrivacy(defaultContactPrivacy())
+    await reloadDetail(item.id)
   }
 
   async function actOnRequest(item: ContactRequest, action: 'accept' | 'delete'): Promise<void> {
@@ -167,14 +169,25 @@ export default function ContactRequestsPanel() {
       let operation = action === 'accept'
         ? await wechatApi.acceptContactRequest(account, item.id, item.version, privacy)
         : await wechatApi.deleteContactRequest(account, item.id, item.version)
-      for (let attempt = 0; attempt < OPERATION_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+      for (let attempt = 0; attempt < OPERATION_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
         await sleep(OPERATION_POLL_MS)
         operation = await wechatApi.getOperation(account, operation.id)
       }
-      if (!isTerminalState(operation.state))
+      if (!isTerminalOperation(operation.state))
         throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
+      if (operation.state === 'needs_review') {
+        // The request may have reached WeChat. Re-read the inbox and the open
+        // request so a completed accept shows its real status, and report only
+        // the part that is unknown instead of inviting a blind retry.
+        setActionError(operationOutcomeMessage(operation.state))
+        await fetchPage(null, false)
+        await reloadDetail(item.id)
+        void refreshFriendRequestCount()
+        void loadContactDirectory(true)
+        return
+      }
       if (operation.state !== 'succeeded')
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+        throw new WechatApiError(operationOutcomeMessage(operation.state), 0)
       setDetail(null)
       await fetchPage(null, false)
       void loadContactDirectory(true)

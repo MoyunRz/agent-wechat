@@ -9,6 +9,7 @@ import { wechatApi, WechatApiError } from '../api'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
+import { isTerminalOperation, operationOutcomeMessage } from '../operations'
 import type { Contact, ContactPrivacySettings } from '../types'
 import { useStore } from '../store/hooks'
 import Icon from './Icon'
@@ -33,10 +34,6 @@ const REMARK_MAX_BYTES = 256
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
-function isTerminalState(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 function privacyHint(code: string): string {
@@ -139,7 +136,7 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
   /** Waits out the daemon's operation; a timeout is reported as uncertain. */
   async function waitForOperation(operationId: string): Promise<string> {
     let operation = await wechatApi.getOperation(accountId, operationId)
-    for (let attempt = 0; attempt < OPERATION_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+    for (let attempt = 0; attempt < OPERATION_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
       await sleep(OPERATION_POLL_MS)
       operation = await wechatApi.getOperation(accountId, operationId)
     }
@@ -198,7 +195,7 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
       })
       const state = await waitForOperation(operation.id)
       if (state !== 'succeeded')
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+        throw new WechatApiError(operationOutcomeMessage(state), 0)
       savedRemarkRef.current = next
       reportSaving('备注已保存')
       await loadProfile()
@@ -250,11 +247,13 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
             watchPrivacyPending()
           return
         }
+        if (state === 'needs_review')
+          throw new WechatApiError(operationOutcomeMessage(state), 0)
         if (attempt === 0) {
           await loadProfile()
           continue
         }
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+        throw new WechatApiError(operationOutcomeMessage(state), 0)
       }
     }
     catch (value) {
@@ -314,7 +313,7 @@ export default function ContactDetailCard({ contactId, onClose, onChanged }: Pro
       const operation = await wechatApi.removeContact(accountId, contactId)
       const state = await waitForOperation(operation.id)
       if (state !== 'succeeded')
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+        throw new WechatApiError(operationOutcomeMessage(state), 0)
       setRemoved(true)
       reportSaving('已删除联系人。聊天记录会保留。')
       onChanged()

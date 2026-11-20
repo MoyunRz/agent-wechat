@@ -10,6 +10,7 @@ import { requestStatus } from '../contact-requests'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
+import { isTerminalOperation, operationOutcomeMessage } from '../operations'
 import type { Contact, ContactDiscovery, ContactPrivacySettings, Operation } from '../types'
 import Icon from './Icon'
 import LoadingDots from './LoadingDots'
@@ -34,10 +35,6 @@ const SYNC_POLL_LIMIT = 80
 const SEARCH_DEBOUNCE_MS = 300
 // Matches the 0.18s opacity transition declared in contact-search.css.
 const TRANSITION_MS = 180
-
-function isTerminalState(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
@@ -200,7 +197,7 @@ export default function ContactSearchDialog({
     setSyncStatus('正在同步通讯录…')
     try {
       let operation = await wechatApi.syncContacts(accountIdRef.current)
-      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
         await sleep(SYNC_POLL_INTERVAL)
         if (token !== syncTokenRef.current)
           return
@@ -208,7 +205,7 @@ export default function ContactSearchDialog({
       }
       if (token !== syncTokenRef.current)
         return
-      if (!isTerminalState(operation.state)) {
+      if (!isTerminalOperation(operation.state)) {
         setSyncFailed(true)
         setSyncStatus('通讯录同步超时，请稍后重试。')
         return
@@ -285,14 +282,14 @@ export default function ContactSearchDialog({
         message,
         privacy,
       })
-      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
         await sleep(SYNC_POLL_INTERVAL)
         operation = await wechatApi.getOperation(account, operation.id)
       }
-      if (!isTerminalState(operation.state))
+      if (!isTerminalOperation(operation.state))
         throw new WechatApiError('操作耗时较长，请稍后重试。', 0)
       if (operation.state !== 'succeeded')
-        throw new WechatApiError('操作未成功，请稍后重试。', 0)
+        throw new WechatApiError(operationOutcomeMessage(operation.state), 0)
       setSent(true)
       setRequestOpen(false)
       await loadContacts()

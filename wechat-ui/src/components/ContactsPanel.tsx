@@ -10,6 +10,7 @@ import { wechatApi, WechatApiError } from '../api'
 import { userFacingErrorMessage } from '../errors'
 import { contactName } from '../format'
 import { useT } from '../i18n/useT'
+import { isTerminalOperation } from '../operations'
 import type { Contact, Operation } from '../types'
 import {
   loadContactDirectory,
@@ -47,10 +48,6 @@ interface DisplayRow {
   contact?: Contact
   nested?: boolean
   group?: { key: string, label: string, count: number }
-}
-
-function isTerminalState(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 function sleep(ms: number): Promise<void> {
@@ -138,6 +135,8 @@ function describeSyncError(value: unknown): string {
 function describeOperationFailure(operation: Operation): string {
   if (operation.state === 'cancelled')
     return '通讯录同步已取消，请重新点击同步。'
+  if (operation.state === 'needs_review')
+    return '操作结果未知，请稍后刷新确认。'
   const code = typeof operation.result?.code === 'string' ? operation.result.code : ''
   if (code === 'auth_required' || code === 'profile_keys_missing' || code === 'not_connected')
     return '请先登录微信并完成同步。'
@@ -368,7 +367,7 @@ export default function ContactsPanel() {
     updateSyncStatus('正在同步通讯录…')
     try {
       let operation = await wechatApi.syncContacts(account)
-      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalState(operation.state); attempt++) {
+      for (let attempt = 0; attempt < SYNC_POLL_LIMIT && !isTerminalOperation(operation.state); attempt++) {
         await sleep(SYNC_POLL_INTERVAL)
         if (token !== syncTokenRef.current)
           return
@@ -376,7 +375,7 @@ export default function ContactsPanel() {
       }
       if (token !== syncTokenRef.current)
         return
-      if (!isTerminalState(operation.state)) {
+      if (!isTerminalOperation(operation.state)) {
         setSyncFailed(true)
         updateSyncStatus('通讯录同步耗时较长，请稍后重新同步。')
         return

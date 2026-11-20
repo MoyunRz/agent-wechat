@@ -4,6 +4,7 @@
 import { wechatApi, WechatApiError } from '../../api'
 import { compareMessages, threadName, threadNoNotify } from '../../format'
 import { t } from '../../i18n'
+import { isTerminalOperation } from '../../operations'
 import { specialAvatarFor } from '../../special-avatars'
 import type { Contact, Thread, ThreadFilter } from '../../types'
 import {
@@ -753,10 +754,6 @@ export async function refreshContactAuthoritative(username: string): Promise<voi
   catch {
     // Offline or the endpoint is not ready: contacts.updated still refreshes.
   }
-}
-
-function isTerminalOperation(state: string): boolean {
-  return state === 'succeeded' || state === 'failed' || state === 'cancelled' || state === 'expired'
 }
 
 /** Overrides raw conversation titles with names from the local directory. */

@@ -707,11 +707,18 @@ impl Core {
         let core = self.clone();
         let account = account.to_owned();
         let key = key.to_owned();
-        let (op, created, guard) = blocking(move || {
-            let (op, new) = core.admit_contact(&account, action, &key)?;
+        let task_account = account.clone();
+        let admitted = blocking(move || {
+            let (op, new) = core.admit_contact(&task_account, action, &key)?;
             Ok((op, new, guard))
         })
-        .await?;
+        .await;
+        if let Err(error) = &admitted {
+            // The HTTP layer keeps only a coarse code; the full chain goes to
+            // stderr for diagnosis.
+            eprintln!("contact mutation admission failed: account={account} error={error:#}");
+        }
+        let (op, created, guard) = admitted?;
         if created {
             let core = self.clone();
             let account = op.account_id.clone();
@@ -730,6 +737,11 @@ impl Core {
                 })
                 .await;
                 if let Err(error) = result {
+                    // The retained operation only carries a coarse code; the full
+                    // chain goes to stderr for diagnosis.
+                    eprintln!(
+                        "contact mutation failed: account={account} operation={id} error={error:#}"
+                    );
                     let code = match error.to_string().as_str() {
                         "stale_contact_privacy" => Some("stale_contact_privacy"),
                         "contact_privacy_unresolved" => Some("contact_privacy_unresolved"),
@@ -1096,7 +1108,8 @@ impl Core {
         );
         receipts.reply = if let Some(rpc) = &attempt.rpc {
             Some(permit.transfer(self, account, || {
-                // Through the account upstream, so the simulator can serve contact edits.
+                // Through the account upstream: only the account's own client may
+                // send contact edits, so this must reach the live session.
                 self.account_upstream(account)?
                     .contact_rpc_raw(&mut state, rpc)
             })?)
